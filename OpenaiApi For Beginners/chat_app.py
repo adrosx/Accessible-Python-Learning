@@ -1014,9 +1014,17 @@ class ChatApp(QWidget):
 #-------------------------------------------------
 
     @log_function
+
     def save_conversation(self):
-        with open("conversation_history.json", "w", encoding="utf-8") as f:
-            json.dump(self.conversation, f, ensure_ascii=False, indent=4)
+        try:
+            with open("conversation_history.json", "w", encoding="utf-8") as f:
+                json.dump(self.conversation, f, ensure_ascii=False, indent=4)
+            logging.info("Rozmowa została pomyślnie zapisana.")
+        except (OSError, IOError) as e:
+            error_message = f"Nie udało się zapisać rozmowy: {e}"
+            logging.error(error_message)
+            print(error_message)  # Opcjonalne wypisanie w terminalu
+            QMessageBox.critical(self, "Błąd zapisu", "Wystąpił problem podczas zapisywania rozmowy.")
             
 #-------------------------------------------------
 #-------------------------------------------------
@@ -1029,16 +1037,36 @@ class ChatApp(QWidget):
     @log_function
     def load_conversation(self):
         if os.path.exists("conversation_history.json"):
-            with open("conversation_history.json", "r", encoding="utf-8") as f:
-                self.conversation = json.load(f)
+            try:
+                with open("conversation_history.json", "r", encoding="utf-8") as f:
+                    self.conversation = json.load(f)  # Próba załadowania JSON
+                logging.info("Pomyślnie załadowano rozmowę z pliku JSON.")
+                # Jeśli JSON poprawny, przetwarzamy wiadomości
                 for msg in self.conversation:
                     if msg['role'] == "assistant" and "```" in msg['content']:
                         self.add_message(msg['content'], msg['role'], is_code=True)
                     elif msg['role'] == "user" and "Załączono obraz:" in msg['content']:
-                        # Opcjonalnie, można dodać obsługę obrazów, jeśli ścieżka jest przechowywana
+                        # Opcjonalnie, obsługa obrazów
                         continue
                     else:
                         self.add_message(msg['content'], msg['role'])
+            except json.JSONDecodeError:
+                error_message = "Plik JSON jest uszkodzony! Nie można załadować rozmowy."
+                logging.error(error_message)
+                print(error_message)  # Opcjonalnie wypisanie w terminalu
+                self.conversation = []  # Resetujemy rozmowę w razie błędu
+                QMessageBox.warning(self, "Błąd wczytywania", error_message)
+            except Exception as e:
+                error_message = f"Wystąpił nieoczekiwany błąd podczas wczytywania: {e}"
+                logging.error(error_message)
+                print(error_message)  # Opcjonalnie wypisanie w terminalu
+                self.conversation = []  # Dla bezpieczeństwa resetujemy
+                QMessageBox.critical(self, "Błąd krytyczny", error_message)
+        else:
+            info_message = "Nie znaleziono pliku z historią rozmów. Tworzenie nowej historii."
+            logging.info(info_message)
+            print(info_message)  # Opcjonalnie wypisanie w terminalu
+            self.conversation = []  # Jeśli pliku nie ma, zaczynamy od pustej historii
 
     # Zapisanie rozmowy przy zamykaniu aplikacji
 #-------------------------------------------------
