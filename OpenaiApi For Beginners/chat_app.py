@@ -11,7 +11,31 @@ from PyQt6.QtGui import QPixmap, QFont, QColor, QPalette, QIcon
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QPropertyAnimation, QSize
 from datetime import datetime
 import json
+import logging
+# Konfiguracja logowania
+LOG_FILE = "app_debug_log.txt"
+if os.path.exists(LOG_FILE):
+    os.remove(LOG_FILE)
+    logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    filemode="w",
+)
 
+# Tworzymy dekorator
+def log_function(func):
+    def wrapper(*args, **kwargs):
+        logging.debug(f"Wywołano funkcję: {func.__name__} z argumentami: {args} {kwargs}")
+        try:
+            result = func(*args, **kwargs)
+            logging.debug(f"Zakończono funkcję: {func.__name__} z wynikiem: {result}")
+            return result
+        except Exception as e:
+            logging.error(f"Błąd w funkcji: {func.__name__} - {e}")
+            raise e  # Ponownie wyrzucamy błąd, żeby program mógł dalej reagować
+    return wrapper
+    
 # Załaduj zmienne środowiskowe z pliku .env
 load_dotenv()
 
@@ -28,6 +52,7 @@ MODELS_FILE = "models.json"
 #-------------------------------------------------
 #-------------------------------------------------
 #-------------------------------------------------
+@log_function
 def load_models():
     if not os.path.exists(MODELS_FILE):
         # Jeśli plik nie istnieje, stwórz domyślną listę modeli
@@ -68,6 +93,7 @@ def load_models():
 #-------------------------------------------------
 #-------------------------------------------------
 
+@log_function
 def save_models(models):
     with open(MODELS_FILE, "w", encoding="utf-8") as f:
         json.dump({"models": models}, f, ensure_ascii=False, indent=4)
@@ -98,7 +124,7 @@ class OpenAIThread(QThread):
 #-NIE ZAPOMNIJ ŻE MASZ 2 INITY W KODZIE-----------
 #-INIT DOTYCZY WĄTKU A NIE APKI!------------------
 #INIT MAIN: def __init__(self, conversation, model)
-
+    @log_function
     def __init__(self, conversation, model):
         super().__init__()
         self.conversation = conversation
@@ -111,7 +137,7 @@ class OpenAIThread(QThread):
 #-------def run(self):----------------------------
 #-------------------------------------------------
 #-------------------------------------------------
-
+    @log_function
     def run(self):
         try:
             response = client.chat.completions.create(
@@ -147,7 +173,7 @@ class ChatApp(QWidget):
 #-----INIT UI: def __init__(self):----------------
 #-----INICJALIZUJE APLIKACJĘ----------------------
 #-----NIE POMYL INIT Z INITEM W WĄTKU-------------
-
+    @log_function
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Chat z OpenAI")
@@ -165,6 +191,7 @@ class ChatApp(QWidget):
 #-------------GŁÓWNY LAYOUT-------------
 #-------------------------------------------------
 #-------------------------------------------------
+    @log_function
     def init_ui(self):
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(15, 15, 15, 15)
@@ -388,7 +415,7 @@ class ChatApp(QWidget):
 #--------UPDATE MODEL DROPDOWN--------------------
 #--------AKTUALIZUJE LISTTE MODELI----------------
 #-------------------------------------------------
-
+    @log_function
     def update_model_dropdown(self):
         self.model_dropdown.clear()
         for model in self.models:
@@ -402,7 +429,7 @@ class ChatApp(QWidget):
 #--------ADD MODEL--------------------------------
 #--------DODAJE MODEL-----------------------------
 #-------------------------------------------------
-
+    @log_function
     def add_model(self):
         text, ok = QInputDialog.getText(self, "Dodaj Model", "Wprowadź nazwę modelu:")
         if ok and text.strip():
@@ -433,7 +460,7 @@ class ChatApp(QWidget):
 #--------REMOVE MODEL-----------------------------
 #--------USUWA MODEL------------------------------
 #-------------------------------------------------
-
+    @log_function
     def remove_model(self):
         current_index = self.model_dropdown.currentIndex()
         if current_index == -1:
@@ -460,7 +487,7 @@ class ChatApp(QWidget):
 #--------ADD MESSAGE------------------------------
 #--------DODAJE WIADOMOŚĆ DO CZATU----------------
 #-------------------------------------------------
-
+    @log_function
     def add_message(self, message, role, is_code=False):
         message_frame = QFrame()
         message_layout = QHBoxLayout()
@@ -597,7 +624,7 @@ class ChatApp(QWidget):
 #--------CREATE AVATAR LABEL LINIA----------------
 #--------TWORZY AWATAR----------------------------
 #-------------------------------------------------
-
+    @log_function
     def create_avatar_label(self, relative_path):
         label = QLabel()
         base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -628,7 +655,7 @@ class ChatApp(QWidget):
 #--------HANDLE SEND LINIA------------------------
 #--------OBSŁUGUJE WYSYŁANIE WIADOMOŚCI-----------
 #-------------------------------------------------
-
+    @log_function
     def handle_send(self):
         user_input = self.input_field.text().strip()
         if user_input == "":
@@ -659,7 +686,7 @@ class ChatApp(QWidget):
 #--------GET SELECTED MODEL-----------------------
 #--------POBIERA WYBRANY MODEL--------------------
 #-------------------------------------------------
-
+    @log_function
     def get_selected_model(self):
         current_text = self.model_dropdown.currentText()
         model_name = current_text.split(":")[0]  # Zakładając format "model_name: description"
@@ -672,7 +699,7 @@ class ChatApp(QWidget):
 #--------HANDLE RESPONSE--------------------------
 #--------OBSŁUGUJE ODPOWIEDŹ API------------------
 #-------------------------------------------------
-
+    @log_function
     def handle_response(self, ai_message):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         # Sprawdzenie, czy wiadomość zawiera fragment kodu
@@ -695,7 +722,8 @@ class ChatApp(QWidget):
 #--------HANDLE ERROR LINIA-----------------------
 #--------OBSŁUGUJE BŁEDY API----------------------
 #-------------------------------------------------
-
+    
+    @log_function
     def handle_error(self, error_message):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.conversation.append({
@@ -711,7 +739,8 @@ class ChatApp(QWidget):
 #--------TOGGLE THEME LINIA 727-------------------
 #--------PRZEŁĄCZA TRYB JASNY/CIEMNY--------------
 #-------------------------------------------------
-
+    
+    @log_function
     def toggle_theme(self):
         palette = self.palette()
         if palette.color(QPalette.ColorRole.Window) == QColor("#f0f0f0"):
@@ -737,6 +766,7 @@ class ChatApp(QWidget):
 #--------USTAWIA TRYB JASNY-----------------------
 #-------------------------------------------------
 
+    @log_function
     def set_light_theme(self):
         self.setStyleSheet("""
             QWidget {
@@ -779,6 +809,7 @@ class ChatApp(QWidget):
 #--------USTAWIA TRYB CIEMNY----------------------
 #-------------------------------------------------
 
+    @log_function
     def set_dark_theme(self):
         self.setStyleSheet("""
             QWidget {
@@ -822,6 +853,7 @@ class ChatApp(QWidget):
 #--------OBSŁUGUJE ZAŁĄCZANIE PLIKÓW--------------
 #-------------------------------------------------
 
+    @log_function
     def handle_attach(self):
         options = QFileDialog.Option.ReadOnly | QFileDialog.Option.DontUseNativeDialog
         file_paths, _ = QFileDialog.getOpenFileNames(
@@ -888,6 +920,7 @@ class ChatApp(QWidget):
 #--------DODAJE OBRAZ DO CZATU--------------------
 #-------------------------------------------------
 
+    @log_function
     def add_image(self, image_path, role, timestamp):
         message_frame = QFrame()
         message_layout = QHBoxLayout()
@@ -980,6 +1013,7 @@ class ChatApp(QWidget):
 #--------ZAPISUJE HISTORIE DO PLIKU---------------
 #-------------------------------------------------
 
+    @log_function
     def save_conversation(self):
         with open("conversation_history.json", "w", encoding="utf-8") as f:
             json.dump(self.conversation, f, ensure_ascii=False, indent=4)
@@ -992,6 +1026,7 @@ class ChatApp(QWidget):
 #--------WCZYTUJE HISTORIĘ CZATU------------------
 #-------------------------------------------------
 
+    @log_function
     def load_conversation(self):
         if os.path.exists("conversation_history.json"):
             with open("conversation_history.json", "r", encoding="utf-8") as f:
@@ -1013,6 +1048,7 @@ class ChatApp(QWidget):
 #--------CLOSE EVENT LINIA------------------------
 #--------ZAPIS PRZY ZAMKNIĘCIU--------------------
 #-------------------------------------------------
+    @log_function
     def closeEvent(self, event):
         self.save_conversation()
         event.accept()
