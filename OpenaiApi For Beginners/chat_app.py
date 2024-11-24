@@ -12,16 +12,47 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QPropertyAnimation, QSize
 from datetime import datetime
 import json
 import logging
+
+# Global paths for assets
+LOG_FILE = os.path.join("app_debug_log.txt")
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
+ICONS_DIR = os.path.dirname(os.path.abspath(__file__))  # Główny katalog projektu
+
+ICON_SEND = os.path.join(ICONS_DIR, "send_icon.png")
+ICON_ATTACH = os.path.join(ICONS_DIR, "attach_icon.png")
+ICON_THEME = os.path.join(ICONS_DIR, "theme_icon.png")
+
+USER_AVATAR = os.path.join(ICONS_DIR, "user_avatar.png")
+AI_AVATAR = os.path.join(ICONS_DIR, "ai_avatar.png")
+DEFAULT_AVATAR = os.path.join(ICONS_DIR, "default_avatar.png")
+
+#-------------------------------------------------
+#---FUNKJA GLOBALNA: LOGOWANIE CENTRALNE----------
+#WSZYSTKIE AKCJE PROGRAMU ZAPISUJEMY DO PLIKU LOG-
+#W DALSZEJ CZĘŚCI UŻYWAMY DEKORATORA DO LOGOWANIA-
+#-------------------------------------------------
+
 # Konfiguracja logowania
-LOG_FILE = "app_debug_log.txt"
+# Jeśli plik logu istnieje, zamknij logger i usuń plik
 if os.path.exists(LOG_FILE):
-    os.remove(LOG_FILE)
-    logging.basicConfig(
+    logging.shutdown()  # Zamyka wszystkie uchwyty loggera
+    os.remove(LOG_FILE)  # Teraz możesz usunąć plik
+    print("Stary plik logów został usunięty.")
+
+# Tworzymy nowy plik logów
+logging.basicConfig(
     filename=LOG_FILE,
     level=logging.DEBUG,
     format="%(asctime)s - %(levelname)s - %(message)s",
-    filemode="w",
+    filemode="w",  # Nadpisanie pliku
 )
+
+logging.debug("Plik logów został utworzony.")  # Wszystko działa#-------------------------------------------------
+#---LOG FUNCTION----------------------------------
+#DEKORATOR TO TAKI JAKBY SKRÓT--------------------
+#UŻYWAMY GO W PRAWIE KAŻDEJ FUNKCJI---------------
+#-------------------------------------------------
 
 # Tworzymy dekorator
 def log_function(func):
@@ -35,6 +66,14 @@ def log_function(func):
             logging.error(f"Błąd w funkcji: {func.__name__} - {e}")
             raise e  # Ponownie wyrzucamy błąd, żeby program mógł dalej reagować
     return wrapper
+
+#-------------------------------------------------
+#-------------------------------------------------
+#-------------------------------------------------
+#---WCZYTANIE KLUCZA API--------------------------
+#ŁADOWANIE KLUCZA API Z PLIKU .ENV
+#-------------------------------------------------
+#-------------------------------------------------
     
 # Załaduj zmienne środowiskowe z pliku .env
 load_dotenv()
@@ -42,16 +81,17 @@ load_dotenv()
 # Importowanie nowej klasy OpenAI
 from openai import OpenAI
 
-# Ścieżka do pliku z modelami
-MODELS_FILE = "models.json"
 #-------------------------------------------------
 #-------------------------------------------------
 #-------------------------------------------------
-#---FUNKJA GLOBALNA: LOAD_MODELS------------------
+#--------LOAD_MODELS------------------------------
 #ŁADOWANIE MODELI Z PLIKU LUB TWORZENIE DOMYŚLNYCH
 #-------------------------------------------------
 #-------------------------------------------------
-#-------------------------------------------------
+
+# Ścieżka do pliku z modelami
+MODELS_FILE = "models.json"
+
 @log_function
 def load_models():
     if not os.path.exists(MODELS_FILE):
@@ -108,10 +148,11 @@ client = OpenAI(
 if not client.api_key:
     print("Klucz API nie został załadowany. Sprawdź plik .env.")
     sys.exit(1)
+
 #-------------------------------------------------
 #-------------------------------------------------
 #-------------------------------------------------
-#------KLASA: OPENAITHREAD------------------------
+#------KLASA: OPEN_AI_THREAD------------------------
 #------WĄTEK DO KOMUNIKACJI Z API OPENAI----------
 #-------------------------------------------------
 #-------------------------------------------------
@@ -120,21 +161,22 @@ if not client.api_key:
 class OpenAIThread(QThread):
     response_received = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
+
 #-------------INICJALIZUJE WĄTEK------------------
 #-NIE ZAPOMNIJ ŻE MASZ 2 INITY W KODZIE-----------
 #-INIT DOTYCZY WĄTKU A NIE APKI!------------------
-#INIT MAIN: def __init__(self, conversation, model)
+#-------------------------------------------------
+
     @log_function
     def __init__(self, conversation, model):
         super().__init__()
         self.conversation = conversation
         self.model = model
-
 #-------------------------------------------------
 #-------------------------------------------------
 #-----RUN-----------------------------------------
 #-----WYSYŁA ZAPYTANIE DO API---------------------
-#-------def run(self):----------------------------
+#-------------------------------------------------
 #-------------------------------------------------
 #-------------------------------------------------
     @log_function
@@ -173,6 +215,7 @@ class ChatApp(QWidget):
 #-----INIT UI: def __init__(self):----------------
 #-----INICJALIZUJE APLIKACJĘ----------------------
 #-----NIE POMYL INIT Z INITEM W WĄTKU-------------
+
     @log_function
     def __init__(self):
         super().__init__()
@@ -183,14 +226,38 @@ class ChatApp(QWidget):
 
         self.init_ui()
         self.load_conversation()
+        self.setWindowIcon(QIcon(ICON_PATH)) 
+        self.load_icons()
 
 #-------------------------------------------------
 #-------------------------------------------------
 #-------------------------------------------------
 #-------------------------------------------------
-#-------------GŁÓWNY LAYOUT-------------
+#-------------GŁÓWNY LAYOUT-----------------------
 #-------------------------------------------------
 #-------------------------------------------------
+        print("Funkcja load_icons została wywołana!")
+    def load_icons(self):
+        try:
+            # Sprawdź czy plik ikony istnieje
+            if os.path.exists(ICON_SEND):
+                logging.debug(f"Załadowano ikonę: {ICON_SEND}")
+            else:
+                logging.warning(f"Ikona send_icon.png nie istnieje w ścieżce: {ICON_SEND}")
+            
+            if os.path.exists(ICON_ATTACH):
+                logging.debug(f"Załadowano ikonę: {ICON_ATTACH}")
+            else:
+                logging.warning(f"Ikona attach_icon.png nie istnieje w ścieżce: {ICON_ATTACH}")
+            
+            if os.path.exists(ICON_THEME):
+                logging.debug(f"Załadowano ikonę: {ICON_THEME}")
+            else:
+                logging.warning(f"Ikona theme_icon.png nie istnieje w ścieżce: {ICON_THEME}")
+
+        except Exception as e:
+            logging.error(f"Błąd podczas ładowania ikon: {e}")
+
     @log_function
     def init_ui(self):
         main_layout = QVBoxLayout()
@@ -316,7 +383,7 @@ class ChatApp(QWidget):
         self.remove_model_button.clicked.connect(self.remove_model)
 
         # Przyciski z ikonami
-        self.send_button = QPushButton(QIcon("send_icon.png"), "")
+        self.send_button = QPushButton(QIcon(ICON_SEND), "")
         self.send_button.setToolTip("Wyślij wiadomość")
         self.send_button.setIconSize(QSize(24, 24))
         self.send_button.setStyleSheet("""
@@ -344,7 +411,7 @@ class ChatApp(QWidget):
 #-------------------------------------------------
 #-------------------------------------------------
 
-        self.attach_button = QPushButton(QIcon("attach_icon.png"), "")
+        self.attach_button = QPushButton(QIcon(ICON_ATTACH), "")
         self.attach_button.setToolTip("Załącz plik")
         self.attach_button.setIconSize(QSize(24, 24))
         self.attach_button.setStyleSheet("""
@@ -381,7 +448,7 @@ class ChatApp(QWidget):
 #-------------------------------------------------
         # Przycisk przełączający tryb jasny/ciemny
         theme_layout = QHBoxLayout()
-        self.theme_button = QPushButton(QIcon("theme_icon.png"), "")
+        self.theme_button = QPushButton(QIcon(ICON_THEME), "")
         self.theme_button.setToolTip("Przełącz tryb")
         self.theme_button.setIconSize(QSize(24, 24))
         self.theme_button.setStyleSheet("""
@@ -483,17 +550,24 @@ class ChatApp(QWidget):
 #-------------------------------------------------
 #-------------------------------------------------
 #-------------------------------------------------
-#-------------------------------------------------
 #--------ADD MESSAGE------------------------------
 #--------DODAJE WIADOMOŚĆ DO CZATU----------------
 #-------------------------------------------------
     @log_function
     def add_message(self, message, role, is_code=False):
+        #-------------------------------------------------
+        #--------FRAME & LAYOUT INITIALIZATION------------
+        #--------TWORZY FRAME I LAYOUT WIADOMOŚCI---------
+        #-------------------------------------------------
         message_frame = QFrame()
         message_layout = QHBoxLayout()
         message_layout.setContentsMargins(0, 0, 0, 0)
         message_layout.setSpacing(10)
 
+        #-------------------------------------------------
+        #--------TIMESTAMP--------------------------------
+        #--------TWORZY ZNACZNIK CZASU--------------------
+        #-------------------------------------------------
         timestamp = QLabel(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         timestamp.setStyleSheet("""
             QLabel {
@@ -503,8 +577,12 @@ class ChatApp(QWidget):
         """)
         timestamp.setAlignment(Qt.AlignmentFlag.AlignRight)
 
+        #-------------------------------------------------
+        #--------USER ROLE--------------------------------
+        #--------JEŚLI ROLA TO "USER"---------------------
+        #-------------------------------------------------
         if role == "user":
-            avatar_path = os.path.join("avatars", "user_avatar.png")
+            avatar_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_avatar.png")
             avatar_label = self.create_avatar_label(avatar_path)
             message_label = QLabel(message)
             message_label.setStyleSheet("""
@@ -524,8 +602,13 @@ class ChatApp(QWidget):
             message_layout.addStretch()
             message_layout.addWidget(message_label)
             message_layout.addWidget(avatar_label)
+
+        #-------------------------------------------------
+        #--------ASSISTANT ROLE---------------------------
+        #--------JEŚLI ROLA TO "ASSISTANT"----------------
+        #-------------------------------------------------
         elif role == "assistant":
-            avatar_path = os.path.join("avatars", "ai_avatar.png")
+            avatar_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), AI_AVATAR)
             avatar_label = self.create_avatar_label(avatar_path)
             if is_code:
                 # Wiadomość zawiera fragment kodu
@@ -563,8 +646,12 @@ class ChatApp(QWidget):
             message_layout.addWidget(avatar_label)
             message_layout.addWidget(message_label)
             message_layout.addStretch()
+
+        #-------------------------------------------------
+        #--------UNKNOWN ROLE-----------------------------
+        #--------JEŚLI ROLA JEST NIEZNANA-----------------
+        #-------------------------------------------------
         else:
-            # Nieznana rola, brak awatara
             avatar_label = QLabel()
             message_label = QLabel(message)
             message_label.setStyleSheet("""
@@ -582,16 +669,19 @@ class ChatApp(QWidget):
             message_layout.addWidget(message_label)
             message_layout.addStretch()
 
-        # Usunięcie linii poniżej
-        # message_frame.setLayout(message_layout)
-
-        # Layout dla znacznika czasu
+        #-------------------------------------------------
+        #--------TIMESTAMP LAYOUT-------------------------
+        #--------DODAJE LAYOUT ZNACZNIKA CZASU-----------
+        #-------------------------------------------------
         timestamp_layout = QHBoxLayout()
         timestamp_layout.addStretch()
         timestamp_layout.addWidget(timestamp)
         timestamp_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Tworzenie głównego layoutu z wiadomością i znacznikiem czasu
+        #-------------------------------------------------
+        #--------MESSAGE FRAME LAYOUT---------------------
+        #--------ŁĄCZY WIADOMOŚĆ I ZNACZNIK CZASU--------
+        #-------------------------------------------------
         message_frame_with_timestamp = QVBoxLayout()
         message_frame_with_timestamp.setContentsMargins(0, 0, 0, 0)
         message_frame_with_timestamp.setSpacing(0)
@@ -602,17 +692,27 @@ class ChatApp(QWidget):
         container_frame.setLayout(message_frame_with_timestamp)
         container_frame.setWindowOpacity(0)  # Początkowa przezroczystość
 
+        #-------------------------------------------------
+        #--------ADD TO CHAT LAYOUT-----------------------
+        #--------DODAJE WIADOMOŚĆ DO UKŁADU CZATU--------
+        #-------------------------------------------------
         self.chat_layout.addWidget(container_frame)
         self.chat_layout.addSpacing(5)
 
-        # Animacja pojawiania się wiadomości
+        #-------------------------------------------------
+        #--------FADE-IN ANIMATION------------------------
+        #--------ANIMACJA POJAWIANIA SIĘ WIADOMOŚCI-------
+        #-------------------------------------------------
         animation = QPropertyAnimation(container_frame, b"windowOpacity")
         animation.setDuration(500)  # Czas trwania animacji w ms
         animation.setStartValue(0)
         animation.setEndValue(1)
         animation.start()
 
-        # Automatyczne przewijanie do najnowszej wiadomości
+        #-------------------------------------------------
+        #--------AUTO-SCROLL------------------------------
+        #--------AUTOMATYCZNE PRZEWIJANIE CZATU-----------
+        #-------------------------------------------------
         self.chat_area.verticalScrollBar().setValue(
             self.chat_area.verticalScrollBar().maximum()
         )
@@ -632,7 +732,7 @@ class ChatApp(QWidget):
         if not os.path.exists(full_path):
             print(f"Avatar nie został znaleziony: {full_path}")
             # Użyj domyślnego awataru lub pozostaw pusty QLabel
-            default_avatar = os.path.join(base_dir, "avatars", "default_avatar.png")
+            default_avatar = DEFAULT_AVATAR
             if os.path.exists(default_avatar):
                 pixmap = QPixmap(default_avatar)
                 pixmap = pixmap.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
@@ -928,9 +1028,10 @@ class ChatApp(QWidget):
         message_layout.setSpacing(10)
 
         if role == "user":
-            avatar_path = os.path.join("avatars", "user_avatar.png")
+            avatar_path = USER_AVATAR
+
         else:
-            avatar_path = os.path.join("avatars", "ai_avatar.png")
+            avatar_path = AI_AVATAR
 
         avatar_label = self.create_avatar_label(avatar_path)
 

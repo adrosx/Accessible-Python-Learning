@@ -1,0 +1,73 @@
+2024-11-24 22:43:22,421 - DEBUG - Plik logów zosta³ utworzony.
+2024-11-24 22:43:22,422 - DEBUG - load_ssl_context verify=True cert=None trust_env=True http2=False
+2024-11-24 22:43:22,422 - DEBUG - load_verify_locations cafile='C:\\Python skrypty\\venv\\lib\\site-packages\\certifi\\cacert.pem'
+2024-11-24 22:43:22,444 - DEBUG - Wywo³ano funkcjê: __init__ z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>,) {}
+2024-11-24 22:43:22,445 - DEBUG - Wywo³ano funkcjê: load_models z argumentami: () {}
+2024-11-24 22:43:22,445 - DEBUG - Zakoñczono funkcjê: load_models z wynikiem: [{'name': 'gpt-4o', 'description': 'High-intelligence flagship model for complex, multi-step tasks.'}, {'name': 'gpt-4o-mini', 'description': 'Affordable and intelligent small model for fast, lightweight tasks.'}, {'name': 'gpt-4-turbo', 'description': 'Latest GPT-4 Turbo model with vision capabilities.'}, {'name': 'gpt-3.5-turbo', 'description': 'Fast, inexpensive model for simple tasks.'}]
+2024-11-24 22:43:22,445 - DEBUG - Wywo³ano funkcjê: init_ui z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>,) {}
+2024-11-24 22:43:22,456 - DEBUG - Wywo³ano funkcjê: update_model_dropdown z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>,) {}
+2024-11-24 22:43:22,456 - DEBUG - Zakoñczono funkcjê: update_model_dropdown z wynikiem: None
+2024-11-24 22:43:22,498 - DEBUG - Wywo³ano funkcjê: set_light_theme z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>,) {}
+2024-11-24 22:43:22,499 - DEBUG - Zakoñczono funkcjê: set_light_theme z wynikiem: None
+2024-11-24 22:43:22,499 - DEBUG - Zakoñczono funkcjê: init_ui z wynikiem: None
+2024-11-24 22:43:22,499 - DEBUG - Wywo³ano funkcjê: load_conversation z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>,) {}
+2024-11-24 22:43:22,503 - INFO - Pomyœlnie za³adowano rozmowê z pliku JSON.
+2024-11-24 22:43:22,503 - DEBUG - Wywo³ano funkcjê: add_message z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>, 'test', 'user') {}
+2024-11-24 22:43:22,503 - DEBUG - Wywo³ano funkcjê: create_avatar_label z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>, 'C:\\Python skrypty\\nauka\\OpenaiApi For Beginners\\user_avatar.png') {}
+2024-11-24 22:43:22,516 - DEBUG - Zakoñczono funkcjê: create_avatar_label z wynikiem: <PyQt6.QtWidgets.QLabel object at 0x000001B6BE8099D0>
+2024-11-24 22:43:22,518 - DEBUG - Zakoñczono funkcjê: add_message z wynikiem: None
+2024-11-24 22:43:22,518 - DEBUG - Wywo³ano funkcjê: add_message z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>, "Sure, I'm here to help! Please let me know what you would like to test or any questions you might have.", 'assistant') {}
+2024-11-24 22:43:22,518 - DEBUG - Wywo³ano funkcjê: create_avatar_label z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>, 'C:\\Python skrypty\\nauka\\OpenaiApi For Beginners\\ai_avatar.png') {}
+2024-11-24 22:43:22,529 - DEBUG - Zakoñczono funkcjê: create_avatar_label z wynikiem: <PyQt6.QtWidgets.QLabel object at 0x000001B6BE809E50>
+2024-11-24 22:43:22,529 - DEBUG - Zakoñczono funkcjê: add_message z wynikiem: None
+2024-11-24 22:43:22,530 - DEBUG - Wywo³ano funkcjê: add_message z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>, 'test', 'user') {}
+2024-11-24 22:43:22,530 - DEBUG - Wywo³ano funkcjê: create_avatar_label z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>, 'C:\\Python skrypty\\nauka\\OpenaiApi For Beginners\\user_avatar.png') {}
+2024-11-24 22:43:22,530 - DEBUG - Zakoñczono funkcjê: create_avatar_label z wynikiem: <PyQt6.QtWidgets.QLabel object at 0x000001B6C09AB280>
+2024-11-24 22:43:22,530 - DEBUG - Zakoñczono funkcjê: add_message z wynikiem: None
+2024-11-24 22:43:22,530 - DEBUG - Zakoñczono funkcjê: load_conversation z wynikiem: None
+2024-11-24 22:43:22,542 - DEBUG - Za³adowano ikonê: C:\Python skrypty\nauka\OpenaiApi For Beginners\send_icon.png
+2024-11-24 22:43:22,542 - DEBUG - Za³adowano ikonê: C:\Python skrypty\nauka\OpenaiApi For Beginners\attach_icon.png
+2024-11-24 22:43:22,542 - DEBUG - Za³adowano ikonê: C:\Python skrypty\nauka\OpenaiApi For Beginners\theme_icon.png
+2024-11-24 22:43:22,542 - DEBUG - Zakoñczono funkcjê: __init__ z wynikiem: None
+2024-11-24 22:43:26,303 - DEBUG - Wywo³ano funkcjê: handle_send z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>,) {}
+2024-11-24 22:43:26,303 - DEBUG - Wywo³ano funkcjê: add_message z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>, 'test', 'user') {}
+2024-11-24 22:43:26,303 - DEBUG - Wywo³ano funkcjê: create_avatar_label z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>, 'C:\\Python skrypty\\nauka\\OpenaiApi For Beginners\\user_avatar.png') {}
+2024-11-24 22:43:26,304 - DEBUG - Zakoñczono funkcjê: create_avatar_label z wynikiem: <PyQt6.QtWidgets.QLabel object at 0x000001B6C09AB670>
+2024-11-24 22:43:26,304 - DEBUG - Zakoñczono funkcjê: add_message z wynikiem: None
+2024-11-24 22:43:26,304 - DEBUG - Wywo³ano funkcjê: get_selected_model z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>,) {}
+2024-11-24 22:43:26,304 - DEBUG - Zakoñczono funkcjê: get_selected_model z wynikiem: gpt-4o
+2024-11-24 22:43:26,305 - DEBUG - Wywo³ano funkcjê: __init__ z argumentami: (<__main__.OpenAIThread object at 0x000001B6BE809CA0>, [{'role': 'user', 'content': 'test', 'timestamp': '2024-11-24 18:57:20'}, {'role': 'assistant', 'content': "Sure, I'm here to help! Please let me know what you would like to test or any questions you might have.", 'timestamp': '2024-11-24 18:57:22'}, {'role': 'user', 'content': 'test', 'timestamp': '2024-11-24 22:37:20'}, {'role': 'user', 'content': 'test', 'timestamp': '2024-11-24 22:43:26'}], 'gpt-4o') {}
+2024-11-24 22:43:26,305 - DEBUG - Zakoñczono funkcjê: __init__ z wynikiem: None
+2024-11-24 22:43:26,305 - DEBUG - Zakoñczono funkcjê: handle_send z wynikiem: None
+2024-11-24 22:43:26,306 - DEBUG - Wywo³ano funkcjê: run z argumentami: (<__main__.OpenAIThread object at 0x000001B6BE809CA0>,) {}
+2024-11-24 22:43:26,311 - DEBUG - Request options: {'method': 'post', 'url': '/chat/completions', 'files': None, 'json_data': {'messages': [{'role': 'user', 'content': 'test', 'timestamp': '2024-11-24 18:57:20'}, {'role': 'assistant', 'content': "Sure, I'm here to help! Please let me know what you would like to test or any questions you might have.", 'timestamp': '2024-11-24 18:57:22'}, {'role': 'user', 'content': 'test', 'timestamp': '2024-11-24 22:37:20'}, {'role': 'user', 'content': 'test', 'timestamp': '2024-11-24 22:43:26'}], 'model': 'gpt-4o', 'frequency_penalty': 0, 'max_tokens': 150, 'presence_penalty': 0.6, 'stop': ['\n', ' User:', ' AI:'], 'temperature': 0.7, 'top_p': 1}}
+2024-11-24 22:43:26,311 - DEBUG - Sending HTTP Request: POST https://api.openai.com/v1/chat/completions
+2024-11-24 22:43:26,312 - DEBUG - connect_tcp.started host='api.openai.com' port=443 local_address=None timeout=5.0 socket_options=None
+2024-11-24 22:43:26,352 - DEBUG - connect_tcp.complete return_value=<httpcore._backends.sync.SyncStream object at 0x000001B6C09C4CD0>
+2024-11-24 22:43:26,352 - DEBUG - start_tls.started ssl_context=<ssl.SSLContext object at 0x000001B6BD6F1E40> server_hostname='api.openai.com' timeout=5.0
+2024-11-24 22:43:26,381 - DEBUG - start_tls.complete return_value=<httpcore._backends.sync.SyncStream object at 0x000001B6C09C4CA0>
+2024-11-24 22:43:26,382 - DEBUG - send_request_headers.started request=<Request [b'POST']>
+2024-11-24 22:43:26,382 - DEBUG - send_request_headers.complete
+2024-11-24 22:43:26,382 - DEBUG - send_request_body.started request=<Request [b'POST']>
+2024-11-24 22:43:26,382 - DEBUG - send_request_body.complete
+2024-11-24 22:43:26,382 - DEBUG - receive_response_headers.started request=<Request [b'POST']>
+2024-11-24 22:43:27,450 - DEBUG - receive_response_headers.complete return_value=(b'HTTP/1.1', 200, b'OK', [(b'Date', b'Sun, 24 Nov 2024 21:43:27 GMT'), (b'Content-Type', b'application/json'), (b'Transfer-Encoding', b'chunked'), (b'Connection', b'keep-alive'), (b'access-control-expose-headers', b'X-Request-ID'), (b'openai-organization', b'user-aauuhsdd4vw4mb4gr5zhklht'), (b'openai-processing-ms', b'483'), (b'openai-version', b'2020-10-01'), (b'x-ratelimit-limit-requests', b'500'), (b'x-ratelimit-limit-tokens', b'30000'), (b'x-ratelimit-remaining-requests', b'499'), (b'x-ratelimit-remaining-tokens', b'29817'), (b'x-ratelimit-reset-requests', b'120ms'), (b'x-ratelimit-reset-tokens', b'366ms'), (b'x-request-id', b'req_e04ed09211950ae0b9b26e39508b0307'), (b'strict-transport-security', b'max-age=31536000; includeSubDomains; preload'), (b'CF-Cache-Status', b'DYNAMIC'), (b'Set-Cookie', b'__cf_bm=8rtUd0mU51N5Ufn_2UVya9CHCIz6HG_eh0a7T3I6Y90-1732484607-1.0.1.1-lQcOVF4aLYhRWEYGH2Ac1mT3YUJgfVYufHSngeeuv7i7L.yAiKt2GIn6ocni_4tmcyx3xBVmHH6WgumQW4uRWg; path=/; expires=Sun, 24-Nov-24 22:13:27 GMT; domain=.api.openai.com; HttpOnly; Secure; SameSite=None'), (b'X-Content-Type-Options', b'nosniff'), (b'Set-Cookie', b'_cfuvid=lP3Ip2FMTsYTbL.neAu2LyHXbAD1rfQY07CzROCTZug-1732484607457-0.0.1.1-604800000; path=/; domain=.api.openai.com; HttpOnly; Secure; SameSite=None'), (b'Server', b'cloudflare'), (b'CF-RAY', b'8e7c9316183dc051-WAW'), (b'Content-Encoding', b'gzip'), (b'alt-svc', b'h3=":443"; ma=86400')])
+2024-11-24 22:43:27,451 - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2024-11-24 22:43:27,451 - DEBUG - receive_response_body.started request=<Request [b'POST']>
+2024-11-24 22:43:27,451 - DEBUG - receive_response_body.complete
+2024-11-24 22:43:27,452 - DEBUG - response_closed.started
+2024-11-24 22:43:27,452 - DEBUG - response_closed.complete
+2024-11-24 22:43:27,452 - DEBUG - HTTP Response: POST https://api.openai.com/v1/chat/completions "200 OK" Headers([('date', 'Sun, 24 Nov 2024 21:43:27 GMT'), ('content-type', 'application/json'), ('transfer-encoding', 'chunked'), ('connection', 'keep-alive'), ('access-control-expose-headers', 'X-Request-ID'), ('openai-organization', 'user-aauuhsdd4vw4mb4gr5zhklht'), ('openai-processing-ms', '483'), ('openai-version', '2020-10-01'), ('x-ratelimit-limit-requests', '500'), ('x-ratelimit-limit-tokens', '30000'), ('x-ratelimit-remaining-requests', '499'), ('x-ratelimit-remaining-tokens', '29817'), ('x-ratelimit-reset-requests', '120ms'), ('x-ratelimit-reset-tokens', '366ms'), ('x-request-id', 'req_e04ed09211950ae0b9b26e39508b0307'), ('strict-transport-security', 'max-age=31536000; includeSubDomains; preload'), ('cf-cache-status', 'DYNAMIC'), ('set-cookie', '__cf_bm=8rtUd0mU51N5Ufn_2UVya9CHCIz6HG_eh0a7T3I6Y90-1732484607-1.0.1.1-lQcOVF4aLYhRWEYGH2Ac1mT3YUJgfVYufHSngeeuv7i7L.yAiKt2GIn6ocni_4tmcyx3xBVmHH6WgumQW4uRWg; path=/; expires=Sun, 24-Nov-24 22:13:27 GMT; domain=.api.openai.com; HttpOnly; Secure; SameSite=None'), ('x-content-type-options', 'nosniff'), ('set-cookie', '_cfuvid=lP3Ip2FMTsYTbL.neAu2LyHXbAD1rfQY07CzROCTZug-1732484607457-0.0.1.1-604800000; path=/; domain=.api.openai.com; HttpOnly; Secure; SameSite=None'), ('server', 'cloudflare'), ('cf-ray', '8e7c9316183dc051-WAW'), ('content-encoding', 'gzip'), ('alt-svc', 'h3=":443"; ma=86400')])
+2024-11-24 22:43:27,452 - DEBUG - request_id: req_e04ed09211950ae0b9b26e39508b0307
+2024-11-24 22:43:27,454 - DEBUG - Zakoñczono funkcjê: run z wynikiem: None
+2024-11-24 22:43:27,455 - DEBUG - Wywo³ano funkcjê: handle_response z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>, "It looks like you're testing the interface. If there's anything specific you need help with or any questions you have, feel free to ask!") {}
+2024-11-24 22:43:27,455 - DEBUG - Wywo³ano funkcjê: add_message z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>, "It looks like you're testing the interface. If there's anything specific you need help with or any questions you have, feel free to ask!", 'assistant', False) {}
+2024-11-24 22:43:27,455 - DEBUG - Wywo³ano funkcjê: create_avatar_label z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>, 'C:\\Python skrypty\\nauka\\OpenaiApi For Beginners\\ai_avatar.png') {}
+2024-11-24 22:43:27,456 - DEBUG - Zakoñczono funkcjê: create_avatar_label z wynikiem: <PyQt6.QtWidgets.QLabel object at 0x000001B6BE8CC4C0>
+2024-11-24 22:43:27,456 - DEBUG - Zakoñczono funkcjê: add_message z wynikiem: None
+2024-11-24 22:43:27,456 - DEBUG - Zakoñczono funkcjê: handle_response z wynikiem: None
+2024-11-24 22:53:15,172 - DEBUG - Wywo³ano funkcjê: closeEvent z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>, <PyQt6.QtGui.QCloseEvent object at 0x000001B6BE8CC790>) {}
+2024-11-24 22:53:15,172 - DEBUG - Wywo³ano funkcjê: save_conversation z argumentami: (<__main__.ChatApp object at 0x000001B6BE809040>,) {}
+2024-11-24 22:53:15,172 - INFO - Rozmowa zosta³a pomyœlnie zapisana.
+2024-11-24 22:53:15,172 - DEBUG - Zakoñczono funkcjê: save_conversation z wynikiem: None
+2024-11-24 22:53:15,172 - DEBUG - Zakoñczono funkcjê: closeEvent z wynikiem: None
