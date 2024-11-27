@@ -1,29 +1,44 @@
+# main.py - Część 1
+
 import sys
-import subprocess
+import os
 import re
-import pygments
-import pdfkit
+import subprocess
 import bisect
 import ast
+import logging
+from functools import wraps
+import io
+import contextlib
+import git
+import unittest
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QFileDialog, QMessageBox,
-    QPlainTextEdit, QWidget, QVBoxLayout, QSplitter, QListWidget,
-    QDialog, QInputDialog, QTextEdit, QTabWidget, QHBoxLayout, QLineEdit, QTabBar,
-    QListWidgetItem
+    QApplication, QMainWindow, QPlainTextEdit, QWidget, QVBoxLayout,
+    QHBoxLayout, QDialog, QCheckBox, QLabel, QComboBox, QSpinBox,
+    QPushButton, QFileDialog, QInputDialog, QMessageBox, QListWidget,
+    QListWidgetItem, QSplitter, QTabWidget, QToolTip
 )
 from PyQt6.QtGui import (
     QFont, QColor, QTextFormat, QPainter, QSyntaxHighlighter,
-    QTextCharFormat, QTextCursor, QKeySequence, QAction, QTextDocument
+    QTextCharFormat, QTextCursor, QAction, QKeySequence, QIcon
 )
-from PyQt6.QtCore import Qt, QRect, QProcess, pyqtSignal, QSize, QTimer, QObject, QThread, QRegularExpression
+from PyQt6.QtCore import (
+    Qt, QRect, QProcess, pyqtSignal, QSize, QTimer, QObject, QThread,
+    QRegularExpression
+)
 from pygments import lex
 from pygments.lexers import get_lexer_by_name
 from pygments.styles import get_style_by_name
-import git
-import unittest
-import io
-import contextlib
-import os
+from PyQt6.QtWidgets import QTextEdit
+import jedi
+
+# Konfiguracja logowania
+logging.basicConfig(
+    filename='app.log',
+    level=logging.DEBUG,
+    format='%(asctime)s - [%(levelname)s] - %(message)s',
+    filemode='w'
+)
 
 class LinterWorker(QObject):
     finished = pyqtSignal(list)
@@ -48,11 +63,12 @@ class LinterWorker(QObject):
             output = result.stdout
             errors = []
             for line in output.strip().split('\n'):
-                match = re.match(rf"{re.escape(temp_file)}:(\d+):\d+:\s+(.*)", line)
-                if match:
-                    line_num = int(match.group(1)) - 1
-                    message = match.group(2)
-                    errors.append((line_num, message))
+                if line:
+                    match = re.match(rf"{re.escape(temp_file)}:(\d+):\d+:\s+(.*)", line)
+                    if match:
+                        line_num = int(match.group(1)) - 1
+                        message = match.group(2)
+                        errors.append((line_num, message))
             self.finished.emit(errors)
         except Exception as e:
             self.error.emit(str(e))
@@ -94,7 +110,7 @@ class GenericHighlighter(QSyntaxHighlighter):
         self.error_format = QTextCharFormat()
         self.error_format.setUnderlineColor(QColor("red"))
         self.error_format.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
-        self.error_lines = set()
+        self.error_lines = {}  # Słownik z komunikatami błędów
 
         for token, style in self.get_pygments_styles().items():
             qt_format = QTextCharFormat()
@@ -123,7 +139,6 @@ class GenericHighlighter(QSyntaxHighlighter):
         block_number = self.currentBlock().blockNumber()
         if block_number in self.error_lines:
             self.setFormat(0, len(text), self.error_format)
-            return
 
         current_position = 0
         for token, content in lex(text, self.lexer):
@@ -161,11 +176,7 @@ class CodeEditor(QPlainTextEdit):
         self.cursorPositionChanged.connect(self.highlight_current_line)
         self.textChanged.connect(self.on_text_changed)
 
-        # Ustawienia początkowe
-        self.update_line_number_area_width(0)
-        self.highlight_current_line()
-
-        # Timer do aktualizacji panelu symboli
+        # Panel symboli
         self.symbols_update_timer = QTimer()
         self.symbols_update_timer.setInterval(500)  # 500 ms
         self.symbols_update_timer.setSingleShot(True)
@@ -179,8 +190,105 @@ class CodeEditor(QPlainTextEdit):
         self.find_dialog = None
         self.last_search_text = ""
 
-    def on_text_changed(self):
-        self.symbols_update_timer.start()  # Restart timera aktualizacji symboli
+        # Ustawienia domyślne
+        self.settings = {
+            'clean_paste': True,
+            'smart_indent': True,
+            'confirm_delete': True,
+            'theme': 'Jasny',
+            'font_size': 12,
+            'auto_save': True,
+            'focus_mode': False,
+        }
+
+        # Autouzupełnianie
+        self.completion_list = QListWidget(self)
+        self.completion_list.setWindowFlags(Qt.WindowType.ToolTip)
+        self.completion_list.itemClicked.connect(self.complete_text)
+        self.completion_list.hide()
+
+        self.setMouseTracking(True)  # Włącz śledzenie ruchu myszy
+        self.setToolTipDuration(0)  # Niech ToolTip pozostaje widoczny, dopóki użytkownik nie opuści linii
+
+        # Update line number area
+        self.update_line_number_area_width(0)
+        self.highlight_current_line()
+
+    def apply_settings(self, settings):
+        self.settings = settings
+
+        # Aktualizacja rozmiaru czcionki
+        font = self.font()
+        font.setPointSize(self.settings.get('font_size', 12))
+        self.setFont(font)
+
+        # Aktualizacja motywu
+        self.highlighter.set_language('python')  # Możesz dodać obsługę innych języków
+
+        self.update()
+
+    def pasteEvent(self, event):
+        if self.settings.get('clean_paste', True):
+            clipboard = QApplication.clipboard()
+            text = clipboard.text()
+            # Usuń nadmiarowe spacje na początku każdej linii
+            cleaned_text = '\n'.join(line.strip() for line in text.split('\n'))
+            self.insertPlainText(cleaned_text)
+        else:
+            super().pasteEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if self.settings.get('smart_indent', True):
+                cursor = self.textCursor()
+                cursor.select(QTextCursor.SelectionType.LineUnderCursor)
+                current_line = cursor.selectedText()
+
+                # Pobierz ilość spacji na początku linii
+                indentation = re.match(r'\s*', current_line).group()
+
+                # Jeśli linia kończy się dwukropkiem, dodaj dodatkowe wcięcie
+                if current_line.rstrip().endswith(':'):
+                    indentation += '    '
+
+                super().keyPressEvent(event)
+
+                # Dodaj wcięcie do nowej linii
+                cursor = self.textCursor()
+                cursor.insertText(indentation)
+                return
+        elif event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            if self.settings.get('confirm_delete', True):
+                reply = QMessageBox.question(self, 'Potwierdzenie Usunięcia',
+                                             'Czy na pewno chcesz usunąć ten fragment?',
+                                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                             QMessageBox.StandardButton.No)
+                if reply != QMessageBox.StandardButton.Yes:
+                    event.ignore()
+                    return
+        elif event.key() == Qt.Key.Key_F and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            self.show_find_dialog()
+            return
+
+        super().keyPressEvent(event)
+
+        # Autouzupełnianie
+        if event.text().isidentifier() or event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+            self.show_completions()
+
+        # Obsługa skrótów klawiszowych do autouzupełniania
+        if self.completion_list.isVisible():
+            if event.key() == Qt.Key.Key_Tab:
+                self.accept_completion()
+                return
+            elif event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
+                self.accept_completion()
+                return
+
+    def accept_completion(self):
+        selected_item = self.completion_list.currentItem()
+        if selected_item:
+            self.complete_text(selected_item)
 
     def toggle_breakpoint(self, block_number):
         if block_number in self.breakpoints:
@@ -214,7 +322,10 @@ class CodeEditor(QPlainTextEdit):
 
     def line_number_area_paint_event(self, event):
         painter = QPainter(self.line_number_area)
-        painter.fillRect(event.rect(), QColor(240, 240, 240))  # Jasne tło dla numerów linii
+        if self.settings.get('theme', 'Jasny') == 'Ciemny':
+            painter.fillRect(event.rect(), QColor(43, 43, 43))  # Ciemne tło
+        else:
+            painter.fillRect(event.rect(), QColor(240, 240, 240))  # Jasne tło dla numerów linii
 
         block = self.firstVisibleBlock()
         block_number = block.blockNumber()
@@ -228,7 +339,7 @@ class CodeEditor(QPlainTextEdit):
                     painter.setPen(QColor(255, 0, 0))  # Czerwony kolor dla breakpointów
                     painter.drawEllipse(2, top + 2, 10, 10)
                 else:
-                    painter.setPen(QColor("black"))
+                    painter.setPen(QColor("black") if self.settings.get('theme', 'Jasny') == 'Jasny' else QColor("white"))
                     painter.drawText(0, top, self.line_number_area.width() - 5, self.fontMetrics().height(),
                                      Qt.AlignmentFlag.AlignRight, number)
             block = block.next()
@@ -242,7 +353,7 @@ class CodeEditor(QPlainTextEdit):
         if not self.isReadOnly():
             selection = QTextEdit.ExtraSelection()
 
-            line_color = QColor(232, 242, 254)  # Jasne podświetlenie bieżącej linii
+            line_color = QColor(232, 242, 254) if self.settings.get('theme', 'Jasny') == 'Jasny' else QColor(50, 50, 50)
             selection.format.setBackground(line_color)
             selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
             selection.cursor = self.textCursor()
@@ -261,31 +372,8 @@ class CodeEditor(QPlainTextEdit):
 
         self.setExtraSelections(extra_selections)
 
-    def keyPressEvent(self, event):
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            # Pobierz bieżący tekst przed kursorem
-            cursor = self.textCursor()
-            cursor.select(QTextCursor.SelectionType.LineUnderCursor)
-            current_line = cursor.selectedText()
-
-            # Zidentyfikuj ilość spacji na początku linii
-            indentation = re.match(r'\s*', current_line).group()
-
-            # Jeśli linia kończy się dwukropkiem, dodaj dodatkowe wcięcie
-            if current_line.rstrip().endswith(':'):
-                indentation += '    '
-
-            super().keyPressEvent(event)
-
-            # Dodaj wcięcie do nowej linii
-            cursor = self.textCursor()
-            cursor.insertText(indentation)
-            return
-        elif event.key() == Qt.Key.Key_F and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            self.show_find_dialog()
-            return
-        else:
-            super().keyPressEvent(event)
+    def on_text_changed(self):
+        self.symbols_update_timer.start()  # Restart timera aktualizacji symboli
 
     def run_linter(self):
         """Uruchamia linter na obecnym kodzie w osobnym wątku."""
@@ -340,7 +428,8 @@ class CodeEditor(QPlainTextEdit):
             return  # Nie aktualizuj highlightera, jeśli błędy się nie zmieniły
         self.previous_errors = errors  # Zapisz nowe błędy
 
-        self.highlighter.error_lines = set(line for line, _ in errors)
+        # Aktualizacja błędów w highlighterze
+        self.highlighter.error_lines = {line: msg for line, msg in errors}
         self.highlighter.rehighlight()
 
     def on_linter_error(self, error_message):
@@ -355,7 +444,7 @@ class CodeEditor(QPlainTextEdit):
         code = self.toPlainText()
         symbols = self.extract_symbols(code)
         self.symbols_updated.emit(symbols)
-        
+
     def extract_symbols(self, code):
         """Ekstrakcja symboli funkcji i klas z kodu za pomocą modułu ast."""
         functions = []
@@ -378,7 +467,6 @@ class CodeEditor(QPlainTextEdit):
         index = bisect.bisect_right(line_start_positions, position) - 1
         return index
 
-
     # Funkcja wyszukiwania
     def show_find_dialog(self):
         if not self.find_dialog:
@@ -387,6 +475,7 @@ class CodeEditor(QPlainTextEdit):
             layout = QHBoxLayout()
             self.find_input = QLineEdit()
             self.find_input.returnPressed.connect(self.find_next)
+            layout.addWidget(QLabel("Znajdź:"))
             layout.addWidget(self.find_input)
             self.find_dialog.setLayout(layout)
         self.find_dialog.show()
@@ -420,7 +509,66 @@ class CodeEditor(QPlainTextEdit):
 
         if not found:
             QMessageBox.information(self, "Znajdź", f"Nie znaleziono: {search_text}")
-            
+
+    def mouseMoveEvent(self, event):
+        cursor = self.cursorForPosition(event.position().toPoint())
+        block = cursor.block()
+        block_number = block.blockNumber()
+        highlighter = self.highlighter
+        if block_number in highlighter.error_lines:
+            # Pobierz komunikat błędu
+            error_message = highlighter.error_lines.get(block_number, "")
+            QToolTip.showText(event.globalPosition().toPoint(), error_message, self)
+        else:
+            QToolTip.hideText()
+            super().mouseMoveEvent(event)
+
+    def show_completions(self):
+        try:
+            cursor = self.textCursor()
+            cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+            prefix = cursor.selectedText()
+
+            if not prefix:
+                self.completion_list.hide()
+                return
+
+            script = jedi.Script(code=self.toPlainText(), path='')
+            completions = script.complete(cursor.position() - 1, column=cursor.column())
+
+            if completions:
+                self.completion_list.clear()
+                for comp in completions:
+                    item = QListWidgetItem(comp.name)
+                    # Dodanie opisu do listy
+                    item.setToolTip(comp.description)
+                    # Opcjonalnie: dodanie ikon (np. funkcji vs zmienne)
+                    if comp.type in ['function', 'class']:
+                        icon = QIcon.fromTheme('function') if 'function' in comp.type else QIcon.fromTheme('class')
+                        item.setIcon(icon)
+                    self.completion_list.addItem(item)
+
+                # Pozycjonowanie listy
+                cursor_rect = self.cursorRect()
+                list_pos = self.mapToGlobal(cursor_rect.bottomRight().toPoint())
+                self.completion_list.move(list_pos)
+                self.completion_list.resize(200, min(150, self.completion_list.sizeHintForRow(0) * len(completions) + 2))
+                self.completion_list.show()
+            else:
+                self.completion_list.hide()
+        except Exception as e:
+            print(f"Autouzupełnianie błędów: {e}")
+            self.completion_list.hide()
+
+    def complete_text(self, item):
+        cursor = self.textCursor()
+        cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+        cursor.removeSelectedText()
+        cursor.insertText(item.text())
+        self.setTextCursor(cursor)
+        self.completion_list.hide()
+# main.py - Część 2
+
 class CodeNavigatorPanel(QWidget):
     def __init__(self, main_window):
         super().__init__()
@@ -481,6 +629,70 @@ class CodeNavigatorPanel(QWidget):
                 editor.setFocus()
                 editor.highlight_current_line()
 
+class SettingsDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Ustawienia IDE")
+        layout = QVBoxLayout()
+
+        # Opcja włączania/wyłączania automatycznego czyszczenia wklejania
+        self.clean_paste_checkbox = QCheckBox("Automatycznie czyść wklejany tekst")
+        self.clean_paste_checkbox.setChecked(True)
+        layout.addWidget(self.clean_paste_checkbox)
+
+        # Opcja włączania/wyłączania inteligentnego wcięcia
+        self.smart_indent_checkbox = QCheckBox("Inteligentne wcięcie")
+        self.smart_indent_checkbox.setChecked(True)
+        layout.addWidget(self.smart_indent_checkbox)
+
+        # Opcja włączania/wyłączania potwierdzenia usunięcia
+        self.confirm_delete_checkbox = QCheckBox("Potwierdzenie przed usunięciem")
+        self.confirm_delete_checkbox.setChecked(True)
+        layout.addWidget(self.confirm_delete_checkbox)
+
+        # Opcja wyboru tematu
+        self.theme_label = QLabel("Wybierz temat:")
+        layout.addWidget(self.theme_label)
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItems(["Jasny", "Ciemny"])
+        layout.addWidget(self.theme_combo)
+
+        # Opcja regulacji rozmiaru czcionki
+        self.font_size_label = QLabel("Rozmiar czcionki:")
+        layout.addWidget(self.font_size_label)
+        self.font_size_spin = QSpinBox()
+        self.font_size_spin.setRange(8, 24)
+        self.font_size_spin.setValue(12)
+        layout.addWidget(self.font_size_spin)
+
+        # Opcja włączania/wyłączania auto-save
+        self.auto_save_checkbox = QCheckBox("Włącz auto-save (co 5 minut)")
+        self.auto_save_checkbox.setChecked(True)
+        layout.addWidget(self.auto_save_checkbox)
+
+        # Opcja włączania/wyłączania trybu skupienia
+        self.focus_mode_checkbox = QCheckBox("Tryb skupienia (ukryj panele boczne)")
+        self.focus_mode_checkbox.setChecked(False)
+        layout.addWidget(self.focus_mode_checkbox)
+
+        # Przycisk Zapisz
+        save_button = QPushButton("Zapisz")
+        save_button.clicked.connect(self.accept)
+        layout.addWidget(save_button)
+
+        self.setLayout(layout)
+
+    def get_settings(self):
+        return {
+            'clean_paste': self.clean_paste_checkbox.isChecked(),
+            'smart_indent': self.smart_indent_checkbox.isChecked(),
+            'confirm_delete': self.confirm_delete_checkbox.isChecked(),
+            'theme': self.theme_combo.currentText(),
+            'font_size': self.font_size_spin.value(),
+            'auto_save': self.auto_save_checkbox.isChecked(),
+            'focus_mode': self.focus_mode_checkbox.isChecked(),
+        }
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -492,6 +704,9 @@ class MainWindow(QMainWindow):
 
         # Przechowywanie ścieżek plików dla zakładek
         self.tab_paths = {}
+
+        # Pasek statusu
+        self.status_bar = self.statusBar()
 
         # Główny widget z zakładkami
         self.tab_widget = QTabWidget()
@@ -537,61 +752,26 @@ class MainWindow(QMainWindow):
         # Inicjalizacja debuggera
         self.debugger = None
 
-    def add_new_tab(self, code="", filename="Untitled"):
-        editor = CodeEditor()
-        editor.setPlainText(code)
-        editor.setParent(self.tab_widget)
+        # Timer Auto-Save
+        self.auto_save_timer = QTimer()
+        self.auto_save_timer.setInterval(300000)  # 5 minut
+        self.auto_save_timer.timeout.connect(self.auto_save)
+        self.auto_save_timer.start()
 
-        self.tab_widget.addTab(editor, filename)
-        self.tab_widget.setCurrentWidget(editor)
+        # Aktualizacja paska statusu
+        self.update_status_bar()
 
-        # Aktualizuj obecny edytor
-        self.on_tab_changed(self.tab_widget.currentIndex())
+        # Ustawienia domyślne
+        self.settings = {
+            'clean_paste': True,
+            'smart_indent': True,
+            'confirm_delete': True,
+            'theme': 'Jasny',
+            'font_size': 12,
+            'auto_save': True,
+            'focus_mode': False,
+        }
 
-        # Przechowywanie ścieżki plików (None dla nowych plików)
-        current_index = self.tab_widget.currentIndex()
-        self.tab_paths[current_index] = None
-
-    def on_tab_changed(self, index):
-        if hasattr(self, 'current_editor') and self.current_editor:
-            # Zatrzymaj linter w poprzednim edytorze
-            if self.current_editor.linter_thread is not None:
-                self.current_editor.linter_thread.quit()
-                self.current_editor.linter_thread.wait()
-                self.current_editor.linter_thread = None
-            # Odłącz sygnały
-            try:
-                self.current_editor.symbols_updated.disconnect(self.navigator_panel.update_symbols)
-            except TypeError:
-                pass  # Sygnał już odłączony
-
-        current_widget = self.tab_widget.widget(index)
-        self.current_editor = current_widget  # Zakładamy, że widgetem jest CodeEditor
-
-        if self.current_editor:
-            self.current_editor.symbols_updated.connect(self.navigator_panel.update_symbols)
-            self.current_editor.update_symbols_panel()
-        else:
-            self.navigator_panel.update_symbols({'functions': [], 'classes': []})
-
-    def close_tab(self, index):
-        if self.tab_widget.count() > 1:
-            # Zatrzymaj linter w edytorze, który jest zamykany
-            editor = self.tab_widget.widget(index)
-            if editor.linter_thread is not None:
-                editor.linter_thread.quit()
-                editor.linter_thread.wait()
-                editor.linter_thread = None
-
-            self.tab_widget.removeTab(index)
-            # Usunięcie przechowywanej ścieżki
-            if index in self.tab_paths:
-                del self.tab_paths[index]
-            # Aktualizacja kluczy w słowniku
-            self.tab_paths = {i: path for i, path in enumerate(self.tab_paths.values())}
-        else:
-            QMessageBox.warning(self, "Ostrzeżenie", "Nie można zamknąć ostatniej zakładki.")
-         
     def create_menu(self):
         menubar = self.menuBar()
 
@@ -673,6 +853,12 @@ class MainWindow(QMainWindow):
         set_flake8_config_action.triggered.connect(self.set_flake8_config)
         config_menu.addAction(set_flake8_config_action)
 
+        # Dodaj opcję "Ustawienia IDE"
+        settings_action = QAction("Ustawienia IDE", self)
+        settings_action.setShortcut(QKeySequence("Ctrl+,"))
+        settings_action.triggered.connect(self.open_settings_dialog)
+        config_menu.addAction(settings_action)
+
         # Menu Git
         git_menu = menubar.addMenu("Git")
 
@@ -703,6 +889,141 @@ class MainWindow(QMainWindow):
         log_action = QAction("Log Commitów", self)
         log_action.triggered.connect(self.git_show_log)
         git_menu.addAction(log_action)
+
+    def open_settings_dialog(self):
+        dialog = SettingsDialog(self)
+        dialog.clean_paste_checkbox.setChecked(self.settings['clean_paste'])
+        dialog.smart_indent_checkbox.setChecked(self.settings['smart_indent'])
+        dialog.confirm_delete_checkbox.setChecked(self.settings['confirm_delete'])
+        dialog.theme_combo.setCurrentText(self.settings['theme'])
+        dialog.font_size_spin.setValue(self.settings['font_size'])
+        dialog.auto_save_checkbox.setChecked(self.settings['auto_save'])
+        dialog.focus_mode_checkbox.setChecked(self.settings['focus_mode'])
+
+        if dialog.exec():
+            self.settings = dialog.get_settings()
+            # Przekaż ustawienia do wszystkich otwartych edytorów
+            for i in range(self.tab_widget.count()):
+                editor = self.tab_widget.widget(i)
+                editor.apply_settings(self.settings)
+            # Zastosuj ustawienia motywu do całego okna
+            self.apply_theme(self.settings['theme'])
+            # Zastosuj tryb skupienia
+            self.apply_settings(self.settings)
+            # Aktualizacja ustawień auto-save
+            if self.settings.get('auto_save', True):
+                self.auto_save_timer.start()
+            else:
+                self.auto_save_timer.stop()
+
+    def apply_theme(self, theme):
+        if theme == "Ciemny":
+            self.setStyleSheet("""
+                QPlainTextEdit, QListWidget, QLineEdit, QTabWidget, QDialog {
+                    background-color: #2b2b2b;
+                    color: #f8f8f2;
+                }
+                QMenuBar, QMenu, QMenu::item {
+                    background-color: #2b2b2b;
+                    color: #f8f8f2;
+                }
+                QTabWidget::pane { /* The tab widget frame */
+                    border-top: 2px solid #C2C7CB;
+                }
+                QTabBar::tab:selected {
+                    background: #3C3F41;
+                    color: white;
+                }
+                QTabBar::tab {
+                    background: #2b2b2b;
+                    color: #f8f8f2;
+                }
+            """)
+        else:
+            self.setStyleSheet("")  # Domyślny jasny motyw
+
+    def apply_settings(self, settings):
+        # Tryb skupienia
+        if settings.get('focus_mode', False):
+            self.navigator_panel.hide()
+            self.output.hide()
+        else:
+            self.navigator_panel.show()
+            self.output.show()
+        # Zaktualizuj pasek statusu
+        self.update_status_bar()
+
+    def update_status_bar(self):
+        editor = self.get_current_editor()
+        if editor:
+            undo_available = editor.document().isUndoAvailable()
+            redo_available = editor.document().isRedoAvailable()
+            status_text = f"Undo: {'Tak' if undo_available else 'Nie'}, Redo: {'Tak' if redo_available else 'Nie'}"
+            self.status_bar.showMessage(status_text)
+        else:
+            self.status_bar.showMessage("Brak aktywnego edytora.")
+
+    def add_new_tab(self, code="", filename="Untitled"):
+        editor = CodeEditor()
+        editor.setPlainText(code)
+        editor.setParent(self.tab_widget)
+
+        self.tab_widget.addTab(editor, filename)
+        self.tab_widget.setCurrentWidget(editor)
+
+        # Aktualizuj obecny edytor
+        self.on_tab_changed(self.tab_widget.currentIndex())
+
+        # Przechowywanie ścieżek plików (None dla nowych plików)
+        current_index = self.tab_widget.currentIndex()
+        self.tab_paths[current_index] = None
+
+        # Połączenie sygnałów do aktualizacji paska statusu
+        editor.textChanged.connect(self.update_status_bar)
+        editor.undoAvailable.connect(self.update_status_bar)
+        editor.redoAvailable.connect(self.update_status_bar)
+
+    def on_tab_changed(self, index):
+        if hasattr(self, 'current_editor') and self.current_editor:
+            # Zatrzymaj linter w poprzednim edytorze
+            if self.current_editor.linter_thread is not None:
+                self.current_editor.linter_thread.quit()
+                self.current_editor.linter_thread.wait()
+                self.current_editor.linter_thread = None
+            # Odłącz sygnały
+            try:
+                self.current_editor.symbols_updated.disconnect(self.navigator_panel.update_symbols)
+            except TypeError:
+                pass  # Sygnał już odłączony
+
+        current_widget = self.tab_widget.widget(index)
+        self.current_editor = current_widget  # Zakładamy, że widgetem jest CodeEditor
+
+        if self.current_editor:
+            self.current_editor.symbols_updated.connect(self.navigator_panel.update_symbols)
+            self.current_editor.update_symbols_panel()
+        else:
+            self.navigator_panel.update_symbols({'functions': [], 'classes': []})
+
+        self.update_status_bar()
+
+    def close_tab(self, index):
+        if self.tab_widget.count() > 1:
+            # Zatrzymaj linter w edytorze, który jest zamykany
+            editor = self.tab_widget.widget(index)
+            if editor.linter_thread is not None:
+                editor.linter_thread.quit()
+                editor.linter_thread.wait()
+                editor.linter_thread = None
+
+            self.tab_widget.removeTab(index)
+            # Usunięcie przechowywanej ścieżki
+            if index in self.tab_paths:
+                del self.tab_paths[index]
+            # Aktualizacja kluczy w słowniku
+            self.tab_paths = {i: path for i, path in enumerate(self.tab_paths.values())}
+        else:
+            QMessageBox.warning(self, "Ostrzeżenie", "Nie można zamknąć ostatniej zakładki.")
 
     def get_current_editor(self):
         return self.current_editor
@@ -798,8 +1119,12 @@ class MainWindow(QMainWindow):
             path, _ = QFileDialog.getSaveFileName(self, "Eksportuj do PDF", "", "PDF Files (*.pdf);;All Files (*)")
             if path:
                 try:
-                    # Konwertuj HTML do PDF
-                    pdfkit.from_string(html_code, path)
+                    # Konwertuj HTML do PDF za pomocą wkhtmltopdf
+                    temp_html = "temp_export.html"
+                    with open(temp_html, 'w', encoding='utf-8') as f:
+                        f.write(html_code)
+                    subprocess.run(['wkhtmltopdf', temp_html, path], check=True)
+                    os.remove(temp_html)  # Usuń tymczasowy plik HTML
                     QMessageBox.information(self, "Eksport", f"Projekt wyeksportowany do PDF: {path}")
                 except Exception as e:
                     QMessageBox.critical(self, "Eksport Błąd", f"Nie można wyeksportować do PDF:\n{e}")
@@ -1047,6 +1372,18 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "Git Repo", f"Wybrane repozytorium: {path}")
             except git.exc.InvalidGitRepositoryError:
                 QMessageBox.critical(self, "Git Błąd", "Wybrany folder nie jest repozytorium Git.")
+
+    def auto_save(self):
+        for i in range(self.tab_widget.count()):
+            editor = self.tab_widget.widget(i)
+            file_path = self.tab_paths.get(i)
+            if file_path and self.settings.get('auto_save', True):
+                try:
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(editor.toPlainText())
+                    print(f"Auto-saved: {file_path}")
+                except Exception as e:
+                    print(f"Auto-save failed for {file_path}: {e}")
 
 def main():
     app = QApplication(sys.argv)
