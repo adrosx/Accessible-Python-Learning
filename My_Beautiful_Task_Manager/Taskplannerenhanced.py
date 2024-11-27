@@ -19,7 +19,7 @@ from PyQt6.QtCore import Qt, QDateTime, QSize, pyqtSignal, QTimer
 from PyQt6.QtGui import (
     QIcon, QAction, QPixmap, QFont, QKeySequence, QShortcut, QColor
 )
-
+ssss
 # ---------------------------------------------
 #        Klasa reprezentująca projekt
 # ---------------------------------------------

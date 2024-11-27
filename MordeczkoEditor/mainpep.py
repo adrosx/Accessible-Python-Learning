@@ -36,7 +36,7 @@ import unittest
 import io
 import contextlib
 import os
-
+slice
 
 class LinterWorker(QObject):
     finished = pyqtSignal(list)

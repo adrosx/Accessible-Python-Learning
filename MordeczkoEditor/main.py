@@ -1,5 +1,3 @@
-# main.py - Część 1
-
 import sys
 import os
 import re
@@ -203,9 +201,14 @@ class CodeEditor(QPlainTextEdit):
 
         # Autouzupełnianie
         self.completion_list = QListWidget(self)
-        self.completion_list.setWindowFlags(Qt.WindowType.ToolTip)
+        self.completion_list.setWindowFlags(Qt.WindowType.Popup)
+        self.completion_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.completion_list.itemClicked.connect(self.complete_text)
         self.completion_list.hide()
+
+        # Załaduj ikony raz
+        self.function_icon = QIcon('assets/icons/function.png')
+        self.class_icon = QIcon('assets/icons/class.png')
 
         self.setMouseTracking(True)  # Włącz śledzenie ruchu myszy
         self.setToolTipDuration(0)  # Niech ToolTip pozostaje widoczny, dopóki użytkownik nie opuści linii
@@ -213,6 +216,12 @@ class CodeEditor(QPlainTextEdit):
         # Update line number area
         self.update_line_number_area_width(0)
         self.highlight_current_line()
+
+        # Debounce Timer dla Autouzupełniania
+        self.completion_timer = QTimer()
+        self.completion_timer.setSingleShot(True)
+        self.completion_timer.setInterval(300)  # 300 ms opóźnienia
+        self.completion_timer.timeout.connect(self.show_completions)
 
     def apply_settings(self, settings):
         self.settings = settings
@@ -270,20 +279,23 @@ class CodeEditor(QPlainTextEdit):
             self.show_find_dialog()
             return
 
-        super().keyPressEvent(event)
-
-        # Autouzupełnianie
-        if event.text().isidentifier() or event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
-            self.show_completions()
-
-        # Obsługa skrótów klawiszowych do autouzupełniania
+        # Obsługa autouzupełniania przed wywołaniem super()
         if self.completion_list.isVisible():
             if event.key() == Qt.Key.Key_Tab:
                 self.accept_completion()
                 return
-            elif event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
+            elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 self.accept_completion()
                 return
+            elif event.key() == Qt.Key.Key_Escape:
+                self.completion_list.hide()
+                return
+
+        super().keyPressEvent(event)
+
+        # Autouzupełnianie po wywołaniu super()
+        if event.text().isidentifier() or event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+            self.completion_timer.start()  # Uruchom timer zamiast wywoływać natychmiast
 
     def accept_completion(self):
         selected_item = self.completion_list.currentItem()
@@ -528,13 +540,33 @@ class CodeEditor(QPlainTextEdit):
             cursor = self.textCursor()
             cursor.select(QTextCursor.SelectionType.WordUnderCursor)
             prefix = cursor.selectedText()
+            print(f"Prefix: {prefix}")  # Debug
 
             if not prefix:
                 self.completion_list.hide()
                 return
 
-            script = jedi.Script(code=self.toPlainText(), path='')
-            completions = script.complete(cursor.position() - 1, column=cursor.column())
+            # Pobierz numer linii i kolumnę
+            block = cursor.block()
+            line = cursor.blockNumber() + 1  # 1-based line number
+            column = cursor.positionInBlock()  # 0-based column number
+
+            # Pobierz całkowitą liczbę linii w dokumencie
+            total_lines = self.document().blockCount()
+            if line > total_lines:
+                line = total_lines
+
+            # Pobierz tekst bieżącej linii
+            current_block_text = block.text()
+            if column > len(current_block_text):
+                column = len(current_block_text)
+
+            print(f"Line: {line}, Column: {column}")  # Debug
+
+            # Inicjalizacja Jedi Script z prawidłową ścieżką
+            script = jedi.Script(code=self.toPlainText(), path='temp.py')
+            completions = script.complete(line, column)
+            print(f"Completions: {len(completions)}")  # Debug
 
             if completions:
                 self.completion_list.clear()
@@ -542,15 +574,16 @@ class CodeEditor(QPlainTextEdit):
                     item = QListWidgetItem(comp.name)
                     # Dodanie opisu do listy
                     item.setToolTip(comp.description)
-                    # Opcjonalnie: dodanie ikon (np. funkcji vs zmienne)
-                    if comp.type in ['function', 'class']:
-                        icon = QIcon.fromTheme('function') if 'function' in comp.type else QIcon.fromTheme('class')
-                        item.setIcon(icon)
+                    # Dodanie ikon (załadowane wcześniej)
+                    if comp.type == 'function':
+                        item.setIcon(self.function_icon)
+                    elif comp.type == 'class':
+                        item.setIcon(self.class_icon)
                     self.completion_list.addItem(item)
 
                 # Pozycjonowanie listy
                 cursor_rect = self.cursorRect()
-                list_pos = self.mapToGlobal(cursor_rect.bottomRight().toPoint())
+                list_pos = self.mapToGlobal(cursor_rect.bottomRight())
                 self.completion_list.move(list_pos)
                 self.completion_list.resize(200, min(150, self.completion_list.sizeHintForRow(0) * len(completions) + 2))
                 self.completion_list.show()
@@ -567,8 +600,12 @@ class CodeEditor(QPlainTextEdit):
         cursor.insertText(item.text())
         self.setTextCursor(cursor)
         self.completion_list.hide()
-# main.py - Część 2
 
+    def accept_completion(self):
+        selected_item = self.completion_list.currentItem()
+        if selected_item:
+            self.complete_text(selected_item)
+            
 class CodeNavigatorPanel(QWidget):
     def __init__(self, main_window):
         super().__init__()
