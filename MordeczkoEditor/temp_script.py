@@ -1,1380 +1,1232 @@
-# ---------------------------------------------
-#            Importowanie bibliotek
-# ---------------------------------------------
 import sys
-import json
-import os
-import requests
-import csv
-from datetime import datetime
+import subprocess
+import re
+import pygments
+import pdfkit
+import bisect
+import ast
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QListWidget, QListWidgetItem, QLabel, QLineEdit,
-    QTextEdit, QMessageBox, QDateTimeEdit, QComboBox, QFileDialog,
-    QDialog, QGridLayout, QScrollArea, QMenu, QToolBar, QInputDialog,
-    QCheckBox, QCalendarWidget, QSystemTrayIcon, QStyle, QProgressBar,
-    QColorDialog, QTabWidget, QFormLayout, QSpacerItem, QSizePolicy
-)
-from PyQt6.QtCore import Qt, QDateTime, QSize, pyqtSignal, QTimer
+    QApplication,
+    QMainWindow,
+    QFileDialog,
+    QMessageBox,
+    QPlainTextEdit,
+    QWidget,
+    QVBoxLayout,
+    QSplitter,
+    QListWidget,
+    QDialog,
+    QInputDialog,
+    QTextEdit,
+    QTabWidget,
+    QHBoxLayout,
+    QLineEdit,
+    QTabBar,
+    QListWidgetItem)
 from PyQt6.QtGui import (
-    QIcon, QAction, QPixmap, QFont, QKeySequence, QShortcut, QColor
+    QFont, QColor, QTextFormat, QPainter, QSyntaxHighlighter,
+    QTextCharFormat, QTextCursor, QKeySequence, QAction, QTextDocument
 )
+from PyQt6.QtCore import Qt, QRect, QProcess, pyqtSignal, QSize, QTimer, QObject, QThread
+from pygments import lex
+from pygments.lexers import get_lexer_by_name
+from pygments.styles import get_style_by_name
+import git
+import unittest
+import io
+import contextlib
+import os
+slice
 
-# ---------------------------------------------
-#        Klasa reprezentująca projekt
-# ---------------------------------------------
-class Project:
-    def __init__(self, name, description, notes=''):
-        self.name = name
-        self.description = description
-        self.notes = notes
-        self.tasks = []
+class LinterWorker(QObject):
+    finished = pyqtSignal(list)
+    error = pyqtSignal(str)
 
-    def to_dict(self):
-        return {
-            'name': self.name,
-            'description': self.description,
-            'notes': self.notes,
-            'tasks': [task.to_dict() for task in self.tasks]
-        }
+    def __init__(self, code, flake8_config, repo_path):
+        super().__init__()
+        self.code = code
+        self.flake8_config = flake8_config
+        self.repo_path = repo_path
 
-    @staticmethod
-    def from_dict(data):
-        project = Project(data['name'], data['description'], data.get('notes', ''))
-        project.tasks = [Task.from_dict(task_data) for task_data in data.get('tasks', [])]
-        return project
+    def run(self):
+        try:
+            temp_file = "temp_script.py"
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                f.write(self.code)
 
-# ---------------------------------------------
-#        Klasa reprezentująca zadanie
-# ---------------------------------------------
-class Task:
-    def __init__(self, title, description, due_date, priority, status, tags=None, images=None):
-        self.title = title
-        self.description = description
-        self.due_date = due_date
-        self.priority = priority
-        self.status = status
-        self.tags = tags or []
-        self.images = images or []
+            args = ['flake8', temp_file]
+            if self.flake8_config:
+                args += ['--config', self.flake8_config]
+            result = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                cwd=self.repo_path)
+            output = result.stdout
+            errors = []
+            for line in output.strip().split('\n'):
+                match = re.match(
+                    rf"{re.escape(temp_file)}:(\d+):\d+:\s+(.*)", line)
+                if match:
+                    line_num = int(match.group(1)) - 1
+                    message = match.group(2)
+                    errors.append((line_num, message))
+            self.finished.emit(errors)
+        except Exception as e:
+            self.error.emit(str(e))
 
-    def to_dict(self):
-        return {
-            'title': self.title,
-            'description': self.description,
-            'due_date': self.due_date.toString(Qt.DateFormat.ISODate),
-            'priority': self.priority,
-            'status': self.status,
-            'tags': self.tags,
-            'images': self.images
-        }
 
-    @staticmethod
-    def from_dict(data):
-        return Task(
-            data['title'],
-            data['description'],
-            QDateTime.fromString(data['due_date'], Qt.DateFormat.ISODate),
-            data['priority'],
-            data['status'],
-            data.get('tags', []),
-            data.get('images', [])
-        )
+class LineNumberArea(QWidget):
+    clicked = pyqtSignal(int)
 
-# ---------------------------------------------
-#          Główna klasa aplikacji
-# ---------------------------------------------
-class TaskManagerApp(QMainWindow):
+    def __init__(self, editor):
+        super().__init__(editor)
+        self.code_editor = editor
+
+    def sizeHint(self):
+        return QSize(self.code_editor.line_number_area_width(), 0)
+
+    def paintEvent(self, event):
+        self.code_editor.line_number_area_paint_event(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            y = event.position().y()
+            block = self.code_editor.firstVisibleBlock()
+            block_number = block.blockNumber()
+            top = int(self.code_editor.blockBoundingGeometry(
+                block).translated(self.code_editor.contentOffset()).top())
+            bottom = top + \
+                int(self.code_editor.blockBoundingRect(block).height())
+
+            while block.isValid() and top <= y:
+                if block.isVisible() and bottom >= y:
+                    self.clicked.emit(block_number)
+                    break
+                block = block.next()
+                top = bottom
+                bottom = top + \
+                    int(self.code_editor.blockBoundingRect(block).height())
+                block_number += 1
+
+
+class GenericHighlighter(QSyntaxHighlighter):
+    def __init__(self, document, language='python'):
+        super().__init__(document)
+        self.formats = {}
+        self.error_format = QTextCharFormat()
+        self.error_format.setUnderlineColor(QColor("red"))
+        self.error_format.setUnderlineStyle(
+            QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
+        self.error_lines = set()
+
+        for token, style in self.get_pygments_styles().items():
+            qt_format = QTextCharFormat()
+            if style:
+                style_parts = style.split()
+                for part in style_parts:
+                    if re.match(r'^#[0-9A-Fa-f]{6}$', part):
+                        qt_format.setForeground(QColor(part))
+                    elif part.lower() == 'bold':
+                        qt_format.setFontWeight(QFont.Weight.Bold)
+                    elif part.lower() == 'italic':
+                        qt_format.setFontItalic(True)
+            self.formats[token] = qt_format
+
+        self.set_language(language)
+
+    def get_pygments_styles(self):
+        style = get_style_by_name('friendly')  # Styl z jasnym tłem
+        return style.styles
+
+    def set_language(self, language):
+        self.lexer = get_lexer_by_name(language)
+        self.rehighlight()
+
+    def highlightBlock(self, text):
+        block_number = self.currentBlock().blockNumber()
+        if block_number in self.error_lines:
+            self.setFormat(0, len(text), self.error_format)
+            return
+
+        current_position = 0
+        for token, content in lex(text, self.lexer):
+            if token in self.formats:
+                length = len(content)
+                self.setFormat(current_position, length, self.formats[token])
+            else:
+                default_format = QTextCharFormat()
+                self.setFormat(current_position, len(content), default_format)
+            current_position += len(content)
+
+
+class CodeEditor(QPlainTextEdit):
+    # Sygnał zaktualizowanych funkcji i klas
+    symbols_updated = pyqtSignal(dict)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFont(QFont("Consolas", 12))
+
+        # Inicjalizacja zmiennych
+        self.breakpoints = set()
+        self.file_path = None
+        self.is_linting = False
+        self.previous_errors = []
+
+        # Highlighter
+        self.highlighter = GenericHighlighter(
+            self.document(), language='python')
+
+        # Tworzenie LineNumberArea
+        self.line_number_area = LineNumberArea(self)
+        self.line_number_area.clicked.connect(self.toggle_breakpoint)
+
+        # Podłączenie sygnałów
+        self.blockCountChanged.connect(self.update_line_number_area_width)
+        self.updateRequest.connect(self.update_line_number_area)
+        self.cursorPositionChanged.connect(self.highlight_current_line)
+        self.textChanged.connect(self.on_text_changed)
+
+        # Ustawienia początkowe
+        self.update_line_number_area_width(0)
+        self.highlight_current_line()
+
+        # Timer do aktualizacji panelu symboli
+        self.symbols_update_timer = QTimer()
+        self.symbols_update_timer.setInterval(500)  # 500 ms
+        self.symbols_update_timer.setSingleShot(True)
+        self.symbols_update_timer.timeout.connect(self.update_symbols_panel)
+
+        # Wątek lintera
+        self.linter_thread = None
+        self.linter_worker = None
+
+        # Dla funkcji wyszukiwania
+        self.find_dialog = None
+        self.last_search_text = ""
+
+    def on_text_changed(self):
+        self.symbols_update_timer.start()  # Restart timera aktualizacji symboli
+
+    def toggle_breakpoint(self, block_number):
+        if block_number in self.breakpoints:
+            self.breakpoints.remove(block_number)
+        else:
+            self.breakpoints.add(block_number)
+        self.highlight_current_line()
+        self.line_number_area.update()
+
+    def line_number_area_width(self):
+        digits = len(str(max(1, self.blockCount())))
+        space = 3 + self.fontMetrics().horizontalAdvance('9') * digits
+        return space
+
+    def update_line_number_area_width(self, _):
+        self.setViewportMargins(self.line_number_area_width(), 0, 0, 0)
+
+    def update_line_number_area(self, rect, dy):
+        if dy:
+            self.line_number_area.scroll(0, dy)
+        else:
+            self.line_number_area.update(
+                0, rect.y(), self.line_number_area.width(), rect.height())
+
+        if rect.contains(self.viewport().rect()):
+            self.update_line_number_area_width(0)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        cr = self.contentsRect()
+        self.line_number_area.setGeometry(
+            QRect(
+                cr.left(),
+                cr.top(),
+                self.line_number_area_width(),
+                cr.height()))
+
+    def line_number_area_paint_event(self, event):
+        painter = QPainter(self.line_number_area)
+        painter.fillRect(event.rect(), QColor(240, 240, 240)
+                         )  # Jasne tło dla numerów linii
+
+        block = self.firstVisibleBlock()
+        block_number = block.blockNumber()
+        top = int(
+            self.blockBoundingGeometry(block).translated(
+                self.contentOffset()).top())
+        bottom = top + int(self.blockBoundingRect(block).height())
+
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                number = str(block_number + 1)
+                if block_number in self.breakpoints:
+                    # Czerwony kolor dla breakpointów
+                    painter.setPen(QColor(255, 0, 0))
+                    painter.drawEllipse(2, top + 2, 10, 10)
+                else:
+                    painter.setPen(QColor("black"))
+                    painter.drawText(
+                        0,
+                        top,
+                        self.line_number_area.width() - 5,
+                        self.fontMetrics().height(),
+                        Qt.AlignmentFlag.AlignRight,
+                        number)
+            block = block.next()
+            top = bottom
+            bottom = top + int(self.blockBoundingRect(block).height())
+            block_number += 1
+
+    def highlight_current_line(self):
+        extra_selections = []
+
+        if not self.isReadOnly():
+            selection = QTextEdit.ExtraSelection()
+
+            # Jasne podświetlenie bieżącej linii
+            line_color = QColor(232, 242, 254)
+            selection.format.setBackground(line_color)
+            selection.format.setProperty(
+                QTextFormat.Property.FullWidthSelection, True)
+            selection.cursor = self.textCursor()
+            selection.cursor.clearSelection()
+            extra_selections.append(selection)
+
+        # Dodaj breakpointy jako dodatkowe selekcje
+        for line in self.breakpoints:
+            block = self.document().findBlockByNumber(line)
+            if block.isValid():
+                cursor = QTextCursor(block)
+                selection = QTextEdit.ExtraSelection()
+                selection.cursor = cursor
+                # Jasnoczerwone tło dla breakpointu
+                selection.format.setBackground(QColor(255, 230, 230))
+                extra_selections.append(selection)
+
+        self.setExtraSelections(extra_selections)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            # Pobierz bieżący tekst przed kursorem
+            cursor = self.textCursor()
+            cursor.select(QTextCursor.SelectionType.LineUnderCursor)
+            current_line = cursor.selectedText()
+
+            # Zidentyfikuj ilość spacji na początku linii
+            indentation = re.match(r'\s*', current_line).group()
+
+            # Jeśli linia kończy się dwukropkiem, dodaj dodatkowe wcięcie
+            if current_line.rstrip().endswith(':'):
+                indentation += '    '
+
+            super().keyPressEvent(event)
+
+            # Dodaj wcięcie do nowej linii
+            cursor = self.textCursor()
+            cursor.insertText(indentation)
+            return
+        elif event.key() == Qt.Key.Key_F and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            self.show_find_dialog()
+            return
+        else:
+            super().keyPressEvent(event)
+
+    def run_linter(self):
+        """Uruchamia linter na obecnym kodzie w osobnym wątku."""
+        if self.is_linting:
+            return  # Nie uruchamiaj nowego lintera, jeśli poprzedni jeszcze działa
+
+        # Zatrzymaj poprzedni wątek lintera, jeśli istnieje
+        if self.linter_thread is not None:
+            self.linter_thread.quit()
+            self.linter_thread.wait()
+            self.linter_thread = None
+
+        self.is_linting = True  # Ustaw flagę na True
+        code = self.toPlainText()
+
+        # Poprawione odnajdywanie MainWindow
+        parent_window = self.window()
+
+        flake8_config = getattr(parent_window, 'flake8_config', None)
+        repo_path = getattr(parent_window, 'git_repo_path', '.')
+
+        self.linter_worker = LinterWorker(code, flake8_config, repo_path)
+        self.linter_thread = QThread()
+        self.linter_worker.moveToThread(self.linter_thread)
+        self.linter_thread.started.connect(self.linter_worker.run)
+        self.linter_worker.finished.connect(self.on_linter_finished)
+        self.linter_worker.error.connect(self.on_linter_error)
+        self.linter_worker.finished.connect(self.linter_thread.quit)
+        self.linter_worker.finished.connect(self.linter_worker.deleteLater)
+        self.linter_thread.finished.connect(self.linter_thread.deleteLater)
+        self.linter_thread.finished.connect(self.cleanup_linter_thread)
+        self.linter_thread.start()
+
+    def cleanup_linter_thread(self):
+        """Czyszczenie referencji do linter_thread po jego zakończeniu."""
+        self.linter_thread = None
+
+    def on_linter_finished(self, errors):
+        self.is_linting = False  # Resetuj flagę
+
+        parent_window = self.window()
+        if parent_window and hasattr(parent_window, 'output'):
+            parent_window.output.clear()
+            if errors:
+                parent_window.output.appendPlainText(">>> Wyniki Lintera:")
+                for line_num, message in errors:
+                    parent_window.output.appendPlainText(
+                        f"Linia {line_num + 1}: {message}")
+            else:
+                parent_window.output.appendPlainText(
+                    ">>> Brak błędów wykrytych przez linter.")
+
+        if errors == self.previous_errors:
+            return  # Nie aktualizuj highlightera, jeśli błędy się nie zmieniły
+        self.previous_errors = errors  # Zapisz nowe błędy
+
+        self.highlighter.error_lines = set(line for line, _ in errors)
+        self.highlighter.rehighlight()
+
+    def on_linter_error(self, error_message):
+        self.is_linting = False  # Resetuj flagę
+        self.linter_thread = None
+        parent_window = self.window()
+        if parent_window and hasattr(parent_window, 'output'):
+            parent_window.output.clear()
+            parent_window.output.appendPlainText(
+                f">>> Błąd lintera: {error_message}")
+
+    def update_symbols_panel(self):
+        code = self.toPlainText()
+        symbols = self.extract_symbols(code)
+        self.symbols_updated.emit(symbols)
+
+    def extract_symbols(self, code):
+        """Ekstrakcja symboli funkcji i klas z kodu za pomocą modułu ast."""
+        functions = []
+        classes = []
+        try:
+            tree = ast.parse(code)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef):
+                    # ast.lineno jest 1-based, QTextDocument blocks are 0-based
+                    functions.append((node.name, node.lineno - 1))
+                elif isinstance(node, ast.ClassDef):
+                    classes.append((node.name, node.lineno - 1))
+        except SyntaxError:
+            # Możesz tutaj obsłużyć błędy składniowe, jeśli to konieczne
+            pass
+        return {'functions': functions, 'classes': classes}
+
+    def get_line_number(self, position, line_start_positions):
+        """Zwraca numer linii na podstawie pozycji w kodzie."""
+        index = bisect.bisect_right(line_start_positions, position) - 1
+        return index
+
+    # Funkcja wyszukiwania
+
+    def show_find_dialog(self):
+        if not self.find_dialog:
+            self.find_dialog = QDialog(self)
+            self.find_dialog.setWindowTitle("Znajdź")
+            layout = QHBoxLayout()
+            self.find_input = QLineEdit()
+            self.find_input.returnPressed.connect(self.find_next)
+            layout.addWidget(self.find_input)
+            self.find_dialog.setLayout(layout)
+        self.find_dialog.show()
+        self.find_dialog.activateWindow()
+        self.find_input.setFocus()
+
+    def find_next(self):
+        search_text = self.find_input.text()
+        if not search_text:
+            return
+        # Rozpocznij od bieżącej pozycji kursora
+        cursor = self.textCursor()
+        if self.last_search_text != search_text:
+            # Nowe wyszukiwanie, zacznij od początku
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            self.setTextCursor(cursor)
+            self.last_search_text = search_text
+
+        # Znajdź kolejne wystąpienie
+        found = self.find(search_text, QTextDocument.FindFlag())
+
+        if not found:
+            # Powtórz od początku
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            self.setTextCursor(cursor)
+            found = self.find(search_text, QTextDocument.FindFlag())
+
+        if not found:
+            QMessageBox.information(
+                self, "Znajdź", f"Nie znaleziono: {search_text}")
+
+
+class CodeNavigatorPanel(QWidget):
+    def __init__(self, main_window):
+        super().__init__()
+        self.main_window = main_window
+        layout = QVBoxLayout()
+        self.tab_widget = QTabWidget()
+        self.functions_list_widget = QListWidget()
+        self.classes_list_widget = QListWidget()
+
+        self.tab_widget.addTab(self.functions_list_widget, "Funkcje")
+        self.tab_widget.addTab(self.classes_list_widget, "Klasy")
+
+        layout.addWidget(self.tab_widget)
+        self.setLayout(layout)
+        self.setMaximumWidth(200)
+
+        # Po kliknięciu na funkcję lub klasę, przenieś kursor do jej definicji
+        self.functions_list_widget.itemClicked.connect(self.go_to_function)
+        self.classes_list_widget.itemClicked.connect(self.go_to_class)
+
+    def update_symbols(self, symbols):
+        self.functions_list_widget.clear()
+        self.classes_list_widget.clear()
+
+        for func_name, line_number in symbols.get('functions', []):
+            item = QListWidgetItem(func_name)
+            item.setData(Qt.ItemDataRole.UserRole, line_number)
+            self.functions_list_widget.addItem(item)
+
+        for class_name, line_number in symbols.get('classes', []):
+            item = QListWidgetItem(class_name)
+            item.setData(Qt.ItemDataRole.UserRole, line_number)
+            self.classes_list_widget.addItem(item)
+
+    def go_to_function(self, item):
+        line_number = item.data(Qt.ItemDataRole.UserRole)
+        editor = self.main_window.get_current_editor()
+        if editor:
+            cursor = editor.textCursor()
+            block = editor.document().findBlockByNumber(line_number)
+            if block.isValid():
+                cursor.setPosition(block.position())
+                editor.setTextCursor(cursor)
+                editor.centerCursor()
+                editor.setFocus()
+                editor.highlight_current_line()
+
+    def go_to_class(self, item):
+        line_number = item.data(Qt.ItemDataRole.UserRole)
+        editor = self.main_window.get_current_editor()
+        if editor:
+            cursor = editor.textCursor()
+            block = editor.document().findBlockByNumber(line_number)
+            if block.isValid():
+                cursor.setPosition(block.position())
+                editor.setTextCursor(cursor)
+                editor.centerCursor()
+                editor.setFocus()
+                editor.highlight_current_line()
+
+
+class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Mój Piękny Menedżer Zadań")
-        self.setWindowIcon(QIcon("icon.png"))
+        self.setWindowTitle("Prosty Edytor Python - MiniIDE")
         self.resize(1200, 800)
 
-        # Inicjalizacja danych
-        self.projects = []  # Lista projektów
-        self.current_project = None  # Aktualnie wybrany projekt
-        self.background_images = []
-        self.themes = self.load_themes()
-        self.current_theme = 'Pastel Pink'
-        self.dark_mode_enabled = False
-        self.custom_theme = {}  # Słownik przechowujący kolory niestandardowego motywu
+        # Inicjalizacja ścieżki repozytorium Git
+        self.git_repo_path = '.'  # Domyślnie bieżący katalog
 
-        # Ustawienia interfejsu
-        self.interface_settings = {
-            'show_description': True,
-            'show_notes': True,
-            'show_due_date': True,
-            'show_tags': True,
-            'show_priority': True,
-            'show_status': True,
-            'show_images': True,
-            'show_instructions': True,
-            'show_projects_section': True,
-            'show_tasks_section': True
-        }
+        # Przechowywanie ścieżek plików dla zakładek
+        self.tab_paths = {}
 
-        # Inicjalizacja interfejsu
-        self.initUI()
+        # Główny widget z zakładkami
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setTabsClosable(True)
+        self.tab_widget.tabCloseRequested.connect(self.close_tab)
+        self.tab_widget.currentChanged.connect(self.on_tab_changed)
 
-        # Ustawienie powiadomień
-        self.setup_notifications()
+        # Panel wyjściowy
+        self.output = QPlainTextEdit()
+        self.output.setReadOnly(True)
+        self.output.setMaximumHeight(200)
+        self.output.setFont(QFont("Consolas", 10))
+        self.output.setStyleSheet("background-color: #f0f0f0;")
 
-    # ---------------------------------------------
-    #       Inicjalizacja interfejsu użytkownika
-    # ---------------------------------------------
-    def initUI(self):
-        self.create_widgets()
+        # Panel nawigacji kodu
+        self.navigator_panel = CodeNavigatorPanel(self)
+
+        # Dodanie pierwszej zakładki
+        self.current_editor = None  # Bieżący edytor
+        self.add_new_tab()
+
+        # Splitter do podziału edytora i paneli bocznych
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        main_splitter.addWidget(self.navigator_panel)
+        main_splitter.addWidget(self.tab_widget)
+        main_splitter.setStretchFactor(1, 3)
+
+        # Główny splitter do podziału edytora i wyjścia
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(main_splitter)
+        splitter.addWidget(self.output)
+        splitter.setStretchFactor(0, 4)
+        splitter.setStretchFactor(1, 1)
+
+        self.setCentralWidget(splitter)
+
         self.create_menu()
-        self.create_toolbar()
-        self.create_layouts()
-        self.apply_theme(self.current_theme)
-        self.update_interface()
 
-        # Skróty klawiszowe
-        self.create_shortcuts()
+        # Ustawienie domyślnego interpretera
+        self.python_interpreter = sys.executable
+        self.flake8_config = None
 
-    # ---------------------------------------------
-    #            Tworzenie widżetów
-    # ---------------------------------------------
-    def create_widgets(self):
-        # Lista projektów
-        self.project_list = QListWidget()
-        self.project_list.itemClicked.connect(self.display_project_details)
-        self.project_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.project_list.customContextMenuRequested.connect(self.show_project_context_menu)
-        self.project_list.setMaximumWidth(200)
+        # Inicjalizacja debuggera
+        self.debugger = None
 
-        # Lista zadań
-        self.task_list = QListWidget()
-        self.task_list.itemClicked.connect(self.display_task_details)
-        self.task_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.task_list.customContextMenuRequested.connect(self.show_task_context_menu)
-        self.task_list.setDragDropMode(QListWidget.DragDropMode.NoDragDrop)
+    def add_new_tab(self, code="", filename="Untitled"):
+        editor = CodeEditor()
+        editor.setPlainText(code)
+        editor.setParent(self.tab_widget)
 
-        # Pola do edycji szczegółów projektu
-        self.project_name_edit = QLineEdit()
-        self.project_description_edit = QTextEdit()
-        self.project_notes_edit = QTextEdit()
+        self.tab_widget.addTab(editor, filename)
+        self.tab_widget.setCurrentWidget(editor)
 
-        # Pola do edycji szczegółów zadania
-        self.title_edit = QLineEdit()
-        self.description_edit = QTextEdit()
-        self.due_date_edit = QDateTimeEdit()
-        self.due_date_edit.setCalendarPopup(True)
-        self.due_date_edit.setDateTime(QDateTime.currentDateTime())
+        # Aktualizuj obecny edytor
+        self.on_tab_changed(self.tab_widget.currentIndex())
 
-        # ComboBoxy dla priorytetu i statusu
-        self.priority_combo = QComboBox()
-        self.priority_combo.addItems(['Niski', 'Średni', 'Wysoki'])
+        # Przechowywanie ścieżki plików (None dla nowych plików)
+        current_index = self.tab_widget.currentIndex()
+        self.tab_paths[current_index] = None
 
-        self.status_combo = QComboBox()
-        self.status_combo.addItems(['Do zrobienia', 'W trakcie', 'Zakończone'])
+    def on_tab_changed(self, index):
+        if hasattr(self, 'current_editor') and self.current_editor:
+            # Zatrzymaj linter w poprzednim edytorze
+            if self.current_editor.linter_thread is not None:
+                self.current_editor.linter_thread.quit()
+                self.current_editor.linter_thread.wait()
+                self.current_editor.linter_thread = None
+            # Odłącz sygnały
+            try:
+                self.current_editor.symbols_updated.disconnect(
+                    self.navigator_panel.update_symbols)
+            except TypeError:
+                pass  # Sygnał już odłączony
 
-        # Pole do wprowadzania tagów
-        self.tags_edit = QLineEdit()
-        self.tags_edit.setPlaceholderText("Wprowadź tagi oddzielone przecinkami")
+        current_widget = self.tab_widget.widget(index)
+        self.current_editor = current_widget  # Zakładamy, że widgetem jest CodeEditor
 
-        # Pole wyszukiwania
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Wyszukaj zadania...")
-        self.search_edit.textChanged.connect(self.search_tasks)
+        if self.current_editor:
+            self.current_editor.symbols_updated.connect(
+                self.navigator_panel.update_symbols)
+            self.current_editor.update_symbols_panel()
+        else:
+            self.navigator_panel.update_symbols(
+                {'functions': [], 'classes': []})
 
-        # Opcje sortowania
-        self.sort_combo = QComboBox()
-        self.sort_combo.addItems(['Brak', 'Priorytet', 'Status', 'Data'])
-        self.sort_combo.currentTextChanged.connect(self.sort_tasks)
+    def close_tab(self, index):
+        if self.tab_widget.count() > 1:
+            # Zatrzymaj linter w edytorze, który jest zamykany
+            editor = self.tab_widget.widget(index)
+            if editor.linter_thread is not None:
+                editor.linter_thread.quit()
+                editor.linter_thread.wait()
+                editor.linter_thread = None
 
-        # Przycisk do zapisywania zadania
-        self.save_task_button = QPushButton("Zapisz zadanie")
-        self.save_task_button.clicked.connect(self.save_task)
+            self.tab_widget.removeTab(index)
+            # Usunięcie przechowywanej ścieżki
+            if index in self.tab_paths:
+                del self.tab_paths[index]
+            # Aktualizacja kluczy w słowniku
+            self.tab_paths = {
+                i: path for i, path in enumerate(
+                    self.tab_paths.values())}
+        else:
+            QMessageBox.warning(
+                self,
+                "Ostrzeżenie",
+                "Nie można zamknąć ostatniej zakładki.")
 
-        # Przyciski do dodawania obrazów do zadania
-        self.add_image_from_disk_button = QPushButton("Dodaj obraz z dysku")
-        self.add_image_from_disk_button.clicked.connect(self.add_image_from_disk)
+    def on_tab_changed(self, index):
+        if hasattr(self, 'current_editor') and self.current_editor:
+            # Zatrzymaj linter w poprzednim edytorze
+            if self.current_editor.linter_thread is not None:
+                self.current_editor.linter_thread.quit()
+                self.current_editor.linter_thread.wait()
+                self.current_editor.linter_thread = None
+            # Odłącz sygnały
+            try:
+                self.current_editor.symbols_updated.disconnect(
+                    self.navigator_panel.update_symbols)
+            except TypeError:
+                pass  # Sygnał już odłączony
 
-        self.add_image_from_url_button = QPushButton("Dodaj obraz z URL")
-        self.add_image_from_url_button.clicked.connect(self.add_image_from_url)
+        current_widget = self.tab_widget.widget(index)
+        self.current_editor = current_widget  # Zakładamy, że widgetem jest CodeEditor
 
-        # Panel instrukcji
-        self.instructions_panel = QTextEdit()
-        self.instructions_panel.setReadOnly(True)
-        self.instructions_panel.setText(self.load_instructions())
+        if self.current_editor:
+            self.current_editor.symbols_updated.connect(
+                self.navigator_panel.update_symbols)
+            self.current_editor.update_symbols_panel()
+        else:
+            self.navigator_panel.update_symbols(
+                {'functions': [], 'classes': []})
 
-        self.toggle_instructions_button = QPushButton("Pokaż/Ukryj instrukcje")
-        self.toggle_instructions_button.clicked.connect(self.toggle_instructions)
-
-        # Przełącznik trybu ciemnego
-        self.dark_mode_toggle = QAction("Tryb ciemny", self)
-        self.dark_mode_toggle.setCheckable(True)
-        self.dark_mode_toggle.triggered.connect(self.toggle_dark_mode)
-
-        # Widok kalendarza
-        self.calendar = QCalendarWidget()
-        self.calendar.selectionChanged.connect(self.show_tasks_on_date)
-
-        # Pasek postępu projektu
-        self.project_progress_bar = QProgressBar()
-        self.project_progress_bar.setValue(0)
-
-        # Lista projektów do wyboru przy tworzeniu zadania
-        self.project_combo = QComboBox()
-        self.project_combo.currentIndexChanged.connect(self.change_current_project)
-
-        # Rozwijane menu z motywami
-        self.theme_dropdown = QComboBox()
-        self.theme_dropdown.addItems(list(self.themes.keys()) + ['Niestandardowy'])
-        self.theme_dropdown.setCurrentText(self.current_theme)
-        self.theme_dropdown.currentTextChanged.connect(self.change_theme_dropdown)
-
-    # ---------------------------------------------
-    #               Tworzenie menu
-    # ---------------------------------------------
     def create_menu(self):
-        menu_bar = self.menuBar()
+        menubar = self.menuBar()
 
-        # Menu "Plik"
-        file_menu = menu_bar.addMenu("Plik")
+        # Menu Plik
+        file_menu = menubar.addMenu("Plik")
 
-        save_action = QAction(QIcon("save.png"), "Zapisz", self)
-        save_action.triggered.connect(self.save_projects)
+        new_action = QAction("Nowy", self)
+        new_action.setShortcut(QKeySequence("Ctrl+N"))
+        new_action.triggered.connect(self.new_file)
+        file_menu.addAction(new_action)
 
-        load_action = QAction(QIcon("load.png"), "Wczytaj", self)
-        load_action.triggered.connect(self.load_projects)
+        open_action = QAction("Otwórz", self)
+        open_action.setShortcut(QKeySequence("Ctrl+O"))
+        open_action.triggered.connect(self.open_file)
+        file_menu.addAction(open_action)
 
-        export_csv_action = QAction("Eksportuj do CSV", self)
-        export_csv_action.triggered.connect(self.export_tasks_to_csv)
-
-        exit_action = QAction(QIcon("exit.png"), "Wyjdź", self)
-        exit_action.triggered.connect(self.close)
-
+        save_action = QAction("Zapisz", self)
+        save_action.setShortcut(QKeySequence("Ctrl+S"))
+        save_action.triggered.connect(self.save_file)
         file_menu.addAction(save_action)
-        file_menu.addAction(load_action)
-        file_menu.addAction(export_csv_action)
+
+        save_as_action = QAction("Zapisz jako...", self)
+        save_as_action.triggered.connect(self.save_file_as)
+        file_menu.addAction(save_as_action)
+
+        # Eksport
+        export_html_action = QAction("Eksportuj do HTML", self)
+        export_html_action.triggered.connect(self.export_to_html)
+        file_menu.addAction(export_html_action)
+
+        export_pdf_action = QAction("Eksportuj do PDF", self)
+        export_pdf_action.triggered.connect(self.export_to_pdf)
+        file_menu.addAction(export_pdf_action)
+
         file_menu.addSeparator()
+
+        exit_action = QAction("Wyjście", self)
+        exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        # Menu "Widok"
-        view_menu = menu_bar.addMenu("Widok")
+        # Menu Uruchom
+        run_menu = menubar.addMenu("Uruchom")
 
-        manage_bg_images_action = QAction("Zarządzaj obrazami planera", self)
-        manage_bg_images_action.triggered.connect(self.manage_background_images)
+        run_action = QAction("Uruchom Skrypt", self)
+        run_action.setShortcut(QKeySequence("F5"))
+        run_action.triggered.connect(self.run_code)
+        run_menu.addAction(run_action)
 
-        view_menu.addAction(manage_bg_images_action)
-        view_menu.addAction(self.dark_mode_toggle)
+        debug_action = QAction("Debuguj Skrypt", self)
+        debug_action.setShortcut(QKeySequence("F6"))
+        debug_action.triggered.connect(self.debug_code)
+        run_menu.addAction(debug_action)
 
-        # Menu "Ustawienia"
-        settings_menu = menu_bar.addMenu("Ustawienia")
+        # Menu Testy
+        test_menu = menubar.addMenu("Testy")
 
-        settings_action = QAction("Ustawienia", self)
-        settings_action.triggered.connect(self.open_settings_dialog)
+        run_tests_action = QAction("Uruchom Testy", self)
+        run_tests_action.setShortcut(QKeySequence("Ctrl+T"))
+        run_tests_action.triggered.connect(self.run_tests)
+        test_menu.addAction(run_tests_action)
 
-        settings_menu.addAction(settings_action)
+        # Menu Środowisko
+        env_menu = menubar.addMenu("Środowisko")
 
-        # Menu "Pomoc"
-        help_menu = menu_bar.addMenu("Pomoc")
+        select_env_action = QAction("Wybierz Interpreter", self)
+        select_env_action.triggered.connect(self.select_interpreter)
+        env_menu.addAction(select_env_action)
 
-        instructions_action = QAction("Instrukcje", self)
-        instructions_action.triggered.connect(self.toggle_instructions)
+        # Menu Konfiguracja
+        config_menu = menubar.addMenu("Konfiguracja")
 
-        help_menu.addAction(instructions_action)
+        # Dodaj opcję "Sprawdź poprawność kodu"
+        check_code_action = QAction("Sprawdź poprawność kodu", self)
+        check_code_action.setShortcut(QKeySequence("Ctrl+L"))
+        check_code_action.triggered.connect(self.run_code_linter)
+        config_menu.addAction(check_code_action)
 
-    # ---------------------------------------------
-    #          Tworzenie paska narzędzi
-    # ---------------------------------------------
-    def create_toolbar(self):
-        toolbar = QToolBar()
-        self.addToolBar(toolbar)
+        set_flake8_config_action = QAction("Ustaw Konfigurację Flake8", self)
+        set_flake8_config_action.triggered.connect(self.set_flake8_config)
+        config_menu.addAction(set_flake8_config_action)
 
-        # Akcje dla projektów
-        add_project_action = QAction(QIcon("add_project.png"), "Nowy projekt", self)
-        add_project_action.triggered.connect(self.create_new_project)
-        add_project_action.setShortcut(QKeySequence("Ctrl+Shift+N"))
+        # Menu Git
+        git_menu = menubar.addMenu("Git")
 
-        delete_project_action = QAction(QIcon("delete_project.png"), "Usuń projekt", self)
-        delete_project_action.triggered.connect(self.delete_project)
+        select_git_repo_action = QAction("Wybierz Repozytorium Git", self)
+        select_git_repo_action.triggered.connect(self.select_git_repo)
+        git_menu.addAction(select_git_repo_action)
 
-        # Akcje dla zadań
-        add_task_action = QAction(QIcon("add_task.png"), "Nowe zadanie", self)
-        add_task_action.triggered.connect(self.clear_task_details)
-        add_task_action.setShortcut(QKeySequence("Ctrl+N"))
+        commit_action = QAction("Commit", self)
+        commit_action.triggered.connect(self.git_commit)
+        git_menu.addAction(commit_action)
 
-        delete_task_action = QAction(QIcon("delete_task.png"), "Usuń zadanie", self)
-        delete_task_action.triggered.connect(self.delete_task)
-        delete_task_action.setShortcut(QKeySequence("Ctrl+D"))
+        push_action = QAction("Push", self)
+        push_action.triggered.connect(self.git_push)
+        git_menu.addAction(push_action)
 
-        toolbar.addAction(add_project_action)
-        toolbar.addAction(delete_project_action)
-        toolbar.addSeparator()
-        toolbar.addAction(add_task_action)
-        toolbar.addAction(delete_task_action)
+        pull_action = QAction("Pull", self)
+        pull_action.triggered.connect(self.git_pull)
+        git_menu.addAction(pull_action)
 
-        # Dodanie rozwijanego menu z motywami
-        toolbar.addSeparator()
-        toolbar.addWidget(QLabel("  Motyw: "))
-        toolbar.addWidget(self.theme_dropdown)
+        branch_action = QAction("Utwórz Branch", self)
+        branch_action.triggered.connect(self.git_create_branch)
+        git_menu.addAction(branch_action)
 
-    # ---------------------------------------------
-    #        Ustawienie układów interfejsu
-    # ---------------------------------------------
-    def create_layouts(self):
-        main_widget = QWidget()
-        self.setCentralWidget(main_widget)
+        merge_action = QAction("Merge Branch", self)
+        merge_action.triggered.connect(self.git_merge_branch)
+        git_menu.addAction(merge_action)
 
-        self.main_layout = QHBoxLayout()
-        main_widget.setLayout(self.main_layout)
+        log_action = QAction("Log Commitów", self)
+        log_action.triggered.connect(self.git_show_log)
+        git_menu.addAction(log_action)
 
-        # Układ dla listy projektów
-        self.project_section = QWidget()
-        project_layout = QVBoxLayout()
-        self.project_section.setLayout(project_layout)
+    def get_current_editor(self):
+        return self.current_editor
 
-        project_label = QLabel("Projekty")
-        project_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        project_layout.addWidget(project_label)
-        project_layout.addWidget(self.project_list)
-
-        # Układ dla szczegółów projektu
-        project_detail_label = QLabel("Szczegóły projektu")
-        project_detail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        project_layout.addWidget(project_detail_label)
-        project_layout.addWidget(QLabel("Nazwa"))
-        project_layout.addWidget(self.project_name_edit)
-        project_layout.addWidget(QLabel("Opis"))
-        project_layout.addWidget(self.project_description_edit)
-        project_layout.addWidget(QLabel("Notatki"))
-        project_layout.addWidget(self.project_notes_edit)
-        project_layout.addWidget(QLabel("Postęp projektu"))
-        project_layout.addWidget(self.project_progress_bar)
-
-        # Układ dla listy zadań
-        self.task_section = QWidget()
-        task_layout = QVBoxLayout()
-        self.task_section.setLayout(task_layout)
-
-        task_layout.addWidget(self.search_edit)
-        task_layout.addWidget(self.sort_combo)
-        task_layout.addWidget(self.task_list)
-
-        # Układ dla szczegółów zadania
-        detail_label = QLabel("Szczegóły zadania")
-        detail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        task_layout.addWidget(detail_label)
-        task_layout.addWidget(QLabel("Tytuł"))
-        task_layout.addWidget(self.title_edit)
-        task_layout.addWidget(QLabel("Opis"))
-        task_layout.addWidget(self.description_edit)
-        task_layout.addWidget(QLabel("Data"))
-        task_layout.addWidget(self.due_date_edit)
-        task_layout.addWidget(QLabel("Priorytet"))
-        task_layout.addWidget(self.priority_combo)
-        task_layout.addWidget(QLabel("Status"))
-        task_layout.addWidget(self.status_combo)
-        task_layout.addWidget(QLabel("Tagi"))
-        task_layout.addWidget(self.tags_edit)
-
-        # Przyciski do dodawania obrazów
-        image_buttons_layout = QHBoxLayout()
-        image_buttons_layout.addWidget(self.add_image_from_disk_button)
-        image_buttons_layout.addWidget(self.add_image_from_url_button)
-        task_layout.addLayout(image_buttons_layout)
-
-        task_layout.addWidget(self.save_task_button)
-
-        # Przycisk do instrukcji
-        task_layout.addWidget(self.toggle_instructions_button)
-        task_layout.addWidget(self.instructions_panel)
-
-        # Układ dla widoku kalendarza
-        calendar_layout = QVBoxLayout()
-        calendar_label = QLabel("Kalendarz")
-        calendar_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        calendar_layout.addWidget(calendar_label)
-        calendar_layout.addWidget(self.calendar)
-
-        # Dodanie układów do głównego układu
-        self.main_layout.addWidget(self.project_section, 20)
-        self.main_layout.addWidget(self.task_section, 50)
-        self.main_layout.addLayout(calendar_layout, 30)
-
-        # Akceptacja przeciągania i upuszczania
-        self.setAcceptDrops(True)
-
-    # ---------------------------------------------
-    #        Aktualizacja interfejsu użytkownika
-    # ---------------------------------------------
-    def update_interface(self):
-        # Show or hide widgets based on interface settings
-        self.description_edit.parentWidget().setVisible(self.interface_settings['show_description'])
-        self.due_date_edit.parentWidget().setVisible(self.interface_settings['show_due_date'])
-        self.priority_combo.parentWidget().setVisible(self.interface_settings['show_priority'])
-        self.status_combo.parentWidget().setVisible(self.interface_settings['show_status'])
-        self.tags_edit.parentWidget().setVisible(self.interface_settings['show_tags'])
-        self.project_notes_edit.parentWidget().setVisible(self.interface_settings['show_notes'])
-        self.add_image_from_disk_button.setVisible(self.interface_settings['show_images'])
-        self.add_image_from_url_button.setVisible(self.interface_settings['show_images'])
-        self.instructions_panel.setVisible(self.interface_settings['show_instructions'])
-        self.toggle_instructions_button.setVisible(self.interface_settings['show_instructions'])
-
-        # Ukrywanie sekcji projektów i zadań
-        self.project_section.setVisible(self.interface_settings['show_projects_section'])
-        self.task_section.setVisible(self.interface_settings['show_tasks_section'])
-
-    # ---------------------------------------------
-    #           Tworzenie skrótów klawiszowych
-    # ---------------------------------------------
-    def create_shortcuts(self):
-        # Nowe zadanie
-        new_task_shortcut = QShortcut(QKeySequence("Ctrl+N"), self)
-        new_task_shortcut.activated.connect(self.clear_task_details)
-
-        # Edycja zadania
-        edit_task_shortcut = QShortcut(QKeySequence("Ctrl+E"), self)
-        edit_task_shortcut.activated.connect(self.edit_task)
-
-    # ---------------------------------------------
-    #          Wczytywanie instrukcji
-    # ---------------------------------------------
-    def load_instructions(self):
-        instructions = """
-**Instrukcje użytkownika:**
-
-- **Dodawanie nowego projektu:**
-  1. Kliknij ikonę "Nowy projekt" na pasku narzędzi.
-  2. Wprowadź nazwę i opis projektu.
-  3. Projekt zostanie dodany do listy projektów.
-
-- **Dodawanie nowego zadania:**
-  1. Wybierz projekt z listy.
-  2. Kliknij ikonę "Nowe zadanie" na pasku narzędzi.
-  3. Wprowadź szczegóły zadania.
-  4. Kliknij "Zapisz zadanie".
-
-- **Filtrowanie i sortowanie zadań:**
-  - Użyj pola wyszukiwania, aby filtrować zadania.
-  - Wybierz kryterium sortowania z rozwijanego menu.
-
-- **Tryb ciemny:**
-  - Przełącz tryb ciemny z menu "Widok" lub klikając odpowiednią opcję.
-
-- **Dostosowywanie motywu:**
-  - W menu "Ustawienia" wybierz "Ustawienia", aby dostosować motyw i interfejs.
-
-- **Ukrywanie elementów interfejsu:**
-  - W menu "Ustawienia" możesz ukryć niektóre pola, jeśli nie są Ci potrzebne.
-
-- **Eksport zadań:**
-  - Wybierz "Plik" → "Eksportuj do CSV", aby wyeksportować zadania do pliku CSV.
-
-- **Powiadomienia:**
-  - Aplikacja automatycznie powiadomi Cię o nadchodzących terminach.
-
-Miłego użytkowania aplikacji!
-"""
-        return instructions
-
-    # ---------------------------------------------
-    #          Pokazanie/Ukrycie instrukcji
-    # ---------------------------------------------
-    def toggle_instructions(self):
-        visible = self.instructions_panel.isVisible()
-        self.instructions_panel.setVisible(not visible)
-
-    # ---------------------------------------------
-    #              Wczytywanie motywów
-    # ---------------------------------------------
-    def load_themes(self):
-        themes = {
-            'Pastel Pink': {
-                'background_color': '#ffe4e1',
-                'text_color': '#8b0000',
-                'button_color': '#ff69b4',
-                'hover_color': '#ff1493',
-                'task_item_background': '#fff0f5',
-                'task_item_text_color': '#8b0000'
-            },
-            'Ocean Blue': {
-                'background_color': '#e0ffff',
-                'text_color': '#00008b',
-                'button_color': '#00bfff',
-                'hover_color': '#1e90ff',
-                'task_item_background': '#f0f8ff',
-                'task_item_text_color': '#00008b'
-            },
-            'Mint Green': {
-                'background_color': '#f5fff5',
-                'text_color': '#006400',
-                'button_color': '#32cd32',
-                'hover_color': '#2e8b57',
-                'task_item_background': '#f0fff0',
-                'task_item_text_color': '#006400'
-            },
-            'Lavender': {
-                'background_color': '#e6e6fa',
-                'text_color': '#4b0082',
-                'button_color': '#9370db',
-                'hover_color': '#8a2be2',
-                'task_item_background': '#f8f8ff',
-                'task_item_text_color': '#4b0082'
-            },
-            'Sunny Yellow': {
-                'background_color': '#ffffe0',
-                'text_color': '#daa520',
-                'button_color': '#ffd700',
-                'hover_color': '#ffc107',
-                'task_item_background': '#fffacd',
-                'task_item_text_color': '#daa520'
-            },
-            'Peach': {
-                'background_color': '#ffdab9',
-                'text_color': '#cd5b45',
-                'button_color': '#ff7f50',
-                'hover_color': '#ff6347',
-                'task_item_background': '#ffefd5',
-                'task_item_text_color': '#cd5b45'
-            },
-            'Coral': {
-                'background_color': '#fff0f5',
-                'text_color': '#8b008b',
-                'button_color': '#ff69b4',
-                'hover_color': '#ff1493',
-                'task_item_background': '#fff5ee',
-                'task_item_text_color': '#8b008b'
-            },
-            'Sky Gray': {
-                'background_color': '#f0f0f0',
-                'text_color': '#2f4f4f',
-                'button_color': '#a9a9a9',
-                'hover_color': '#808080',
-                'task_item_background': '#dcdcdc',
-                'task_item_text_color': '#2f4f4f'
-            },
-            'Cream': {
-                'background_color': '#fffdd0',
-                'text_color': '#8b4513',
-                'button_color': '#deb887',
-                'hover_color': '#d2b48c',
-                'task_item_background': '#f5f5dc',
-                'task_item_text_color': '#8b4513'
-            },
-            'Lilac': {
-                'background_color': '#f3e5f5',
-                'text_color': '#6a1b9a',
-                'button_color': '#ba68c8',
-                'hover_color': '#9c27b0',
-                'task_item_background': '#ede7f6',
-                'task_item_text_color': '#6a1b9a'
-            },
-            'Dark Mode': {
-                'background_color': '#121212',
-                'text_color': '#ffffff',
-                'button_color': '#1e1e1e',
-                'hover_color': '#333333',
-                'task_item_background': '#1e1e1e',
-                'task_item_text_color': '#ffffff'
-            },
-        }
-        return themes
-
-    # ---------------------------------------------
-    #           Zastosowanie wybranego motywu
-    # ---------------------------------------------
-    def apply_theme(self, theme_name):
-        if theme_name == 'Niestandardowy':
-            theme = self.custom_theme
+    def run_code_linter(self):
+        """Metoda wywołująca linter w CodeEditor"""
+        editor = self.get_current_editor()
+        if editor:
+            editor.run_linter()
         else:
-            theme = self.themes.get(theme_name, self.themes['Pastel Pink'])
+            QMessageBox.warning(self, "Linter", "Brak aktywnego edytora.")
 
-        if not theme:
-            QMessageBox.warning(self, "Brak motywu", "Brak zdefiniowanego motywu niestandardowego.")
-            return
+    def new_file(self):
+        self.add_new_tab()
 
-        # Upewnij się, że wszystkie klucze są obecne
-        default_theme = self.themes['Pastel Pink']
-        for key in default_theme:
-            if key not in theme or not theme[key]:
-                theme[key] = default_theme[key]
-
-        self.setStyleSheet(f"""
-            QMainWindow {{
-                background-color: {theme['background_color']};
-            }}
-            QLabel {{
-                font-size: 14px;
-                font-weight: bold;
-                color: {theme['text_color']};
-            }}
-            QLineEdit, QTextEdit, QDateTimeEdit, QComboBox {{
-                background-color: #ffffff;
-                border: 1px solid {theme['button_color']};
-                border-radius: 5px;
-                padding: 5px;
-                font-size: 13px;
-            }}
-            QPushButton {{
-                background-color: {theme['button_color']};
-                color: #ffffff;
-                border-radius: 5px;
-                padding: 10px;
-                font-size: 14px;
-            }}
-            QPushButton:hover {{
-                background-color: {theme['hover_color']};
-            }}
-            QListWidget {{
-                background-color: #ffffff;
-                border: 1px solid {theme['button_color']};
-                border-radius: 5px;
-                font-size: 13px;
-            }}
-            QListWidget::item {{
-                background-color: {theme['task_item_background']};
-                color: {theme['task_item_text_color']};
-                padding: 10px;
-            }}
-            QListWidget::item:selected {{
-                background-color: {theme['button_color']};
-                color: #ffffff;
-            }}
-            QMenuBar, QMenu, QToolBar {{
-                background-color: {theme['background_color']};
-                color: {theme['text_color']};
-            }}
-            QMenuBar::item, QMenu::item {{
-                background-color: {theme['background_color']};
-                color: {theme['text_color']};
-            }}
-            QMenuBar::item:selected, QMenu::item:selected {{
-                background-color: {theme['hover_color']};
-            }}
-        """)
-        self.dark_mode_enabled = (theme_name == 'Dark Mode')
-
-    # ---------------------------------------------
-    #       Zmiana motywu z rozwijanego menu
-    # ---------------------------------------------
-    def change_theme_dropdown(self, theme_name):
-        self.current_theme = theme_name
-        if theme_name == 'Niestandardowy':
-            self.open_settings_dialog()
-        else:
-            self.apply_theme(theme_name)
-
-    # ---------------------------------------------
-    #             Przełączanie trybu ciemnego
-    # ---------------------------------------------
-    def toggle_dark_mode(self):
-        if self.dark_mode_enabled:
-            self.current_theme = 'Pastel Pink'
-        else:
-            self.current_theme = 'Dark Mode'
-        self.apply_theme(self.current_theme)
-        self.theme_dropdown.setCurrentText(self.current_theme)
-        self.dark_mode_enabled = not self.dark_mode_enabled
-
-    # ---------------------------------------------
-    #         Otwieranie okna ustawień
-    # ---------------------------------------------
-    def open_settings_dialog(self):
-        dialog = SettingsDialog(self.custom_theme, self.interface_settings)
-        if dialog.exec():
-            self.custom_theme = dialog.get_custom_theme()
-            self.interface_settings = dialog.get_interface_settings()
-            if dialog.theme_changed:
-                self.apply_theme('Niestandardowy')
-                self.theme_dropdown.setCurrentText('Niestandardowy')
-            self.update_interface()
-
-    # ---------------------------------------------
-    #          Tworzenie nowego projektu
-    # ---------------------------------------------
-    def create_new_project(self):
-        name, ok = QInputDialog.getText(self, "Nowy projekt", "Wprowadź nazwę projektu:")
-        if ok and name:
-            description, ok = QInputDialog.getMultiLineText(self, "Nowy projekt", "Wprowadź opis projektu:")
-            if ok:
-                project = Project(name, description)
-                self.projects.append(project)
-                self.refresh_project_list()
-                self.project_combo.addItem(project.name)
-                QMessageBox.information(self, "Sukces", "Projekt został dodany.")
-
-    # ---------------------------------------------
-    #            Usuwanie projektu
-    # ---------------------------------------------
-    def delete_project(self):
-        selected_item = self.project_list.currentItem()
-        if selected_item:
-            index = self.project_list.row(selected_item)
-            project = self.projects.pop(index)
-            self.refresh_project_list()
-            self.project_combo.removeItem(self.project_combo.findText(project.name))
-            QMessageBox.information(self, "Sukces", "Projekt został usunięty.")
-            self.current_project = None
-            self.refresh_task_list()
-        else:
-            QMessageBox.warning(self, "Brak wyboru", "Wybierz projekt do usunięcia.")
-
-    # ---------------------------------------------
-    #        Wyświetlanie szczegółów projektu
-    # ---------------------------------------------
-    def display_project_details(self, item):
-        index = self.project_list.row(item)
-        project = self.projects[index]
-        self.current_project = project
-
-        self.project_name_edit.setText(project.name)
-        self.project_description_edit.setPlainText(project.description)
-        self.project_notes_edit.setPlainText(project.notes)
-
-        self.refresh_task_list()
-        self.update_project_progress()
-        self.project_combo.setCurrentText(project.name)
-
-    # ---------------------------------------------
-    #        Odświeżanie listy projektów
-    # ---------------------------------------------
-    def refresh_project_list(self):
-        self.project_list.clear()
-        for project in self.projects:
-            item = QListWidgetItem(project.name)
-            item.setData(Qt.ItemDataRole.UserRole, project)
-            item.setFont(QFont('Arial', 12))
-            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.project_list.addItem(item)
-
-    # ---------------------------------------------
-    #             Zmiana bieżącego projektu
-    # ---------------------------------------------
-    def change_current_project(self):
-        project_name = self.project_combo.currentText()
-        for project in self.projects:
-            if project.name == project_name:
-                self.current_project = project
-                self.refresh_task_list()
-                self.update_project_progress()
-                break
-
-    # ---------------------------------------------
-    #            Zapisywanie zadania
-    # ---------------------------------------------
-    def save_task(self):
-        if not self.current_project:
-            QMessageBox.warning(self, "Brak projektu", "Wybierz projekt przed dodaniem zadania.")
-            return
-
-        title = self.title_edit.text()
-        if not title:
-            QMessageBox.warning(self, "Brak tytułu", "Wprowadź tytuł zadania.")
-            return
-
-        selected_item = self.task_list.currentItem()
-        if selected_item:
-            index = self.task_list.row(selected_item)
-            task = self.current_project.tasks[index]
-        else:
-            task = Task("", "", QDateTime.currentDateTime(), "", "", [])
-            self.current_project.tasks.append(task)
-
-        task.title = title
-        task.description = self.description_edit.toPlainText() if self.interface_settings['show_description'] else ""
-        task.due_date = self.due_date_edit.dateTime() if self.interface_settings['show_due_date'] else QDateTime.currentDateTime()
-        task.priority = self.priority_combo.currentText() if self.interface_settings['show_priority'] else "Niski"
-        task.status = self.status_combo.currentText() if self.interface_settings['show_status'] else "Do zrobienia"
-        task.tags = [tag.strip() for tag in self.tags_edit.text().split(',')] if self.interface_settings['show_tags'] else []
-
-        self.refresh_task_list()
-        self.clear_task_details()
-        self.update_project_progress()
-
-    # ---------------------------------------------
-    #            Usuwanie zadania
-    # ---------------------------------------------
-    def delete_task(self):
-        if not self.current_project:
-            QMessageBox.warning(self, "Brak projektu", "Wybierz projekt.")
-            return
-
-        selected_item = self.task_list.currentItem()
-        if selected_item:
-            index = self.task_list.row(selected_item)
-            del self.current_project.tasks[index]
-            self.refresh_task_list()
-            self.clear_task_details()
-            self.update_project_progress()
-        else:
-            QMessageBox.warning(self, "Brak wyboru", "Wybierz zadanie do usunięcia.")
-
-    # ---------------------------------------------
-    #          Odświeżanie listy zadań
-    # ---------------------------------------------
-    def refresh_task_list(self):
-        self.task_list.clear()
-        if not self.current_project:
-            return
-
-        for task in self.current_project.tasks:
-            item = QListWidgetItem(f"{task.title} ({task.status})")
-            item.setData(Qt.ItemDataRole.UserRole, task)
-            item.setFont(QFont('Arial', 12))
-            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.task_list.addItem(item)
-
-    # ---------------------------------------------
-    #    Wyświetlanie szczegółów wybranego zadania
-    # ---------------------------------------------
-    def display_task_details(self, item):
-        index = self.task_list.row(item)
-        task = self.current_project.tasks[index]
-
-        self.title_edit.setText(task.title)
-        self.description_edit.setPlainText(task.description)
-        self.due_date_edit.setDateTime(task.due_date)
-        self.priority_combo.setCurrentText(task.priority)
-        self.status_combo.setCurrentText(task.status)
-        self.tags_edit.setText(', '.join(task.tags))
-
-    # ---------------------------------------------
-    #          Czyszczenie pól zadania
-    # ---------------------------------------------
-    def clear_task_details(self):
-        self.task_list.clearSelection()
-        self.title_edit.clear()
-        self.description_edit.clear()
-        self.due_date_edit.setDateTime(QDateTime.currentDateTime())
-        self.priority_combo.setCurrentIndex(0)
-        self.status_combo.setCurrentIndex(0)
-        self.tags_edit.clear()
-
-    # ---------------------------------------------
-    #            Zapisywanie projektów
-    # ---------------------------------------------
-    def save_projects(self):
-        options = QFileDialog.Options()
-        file_name, _ = QFileDialog.getSaveFileName(
-            self, "Zapisz projekty", "", "JSON Files (*.json)", options=options
-        )
-        if file_name:
-            data = {
-                'projects': [project.to_dict() for project in self.projects],
-                'background_images': self.background_images,
-                'current_theme': self.current_theme,
-                'custom_theme': self.custom_theme,
-                'interface_settings': self.interface_settings
-            }
+    def open_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Otwórz plik", "", "Python Files (*.py);;JavaScript Files (*.js);;C++ Files (*.cpp *.hpp);;Go Files (*.go);;All Files (*)")
+        if path:
             try:
-                with open(file_name, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, ensure_ascii=False, indent=4)
-                QMessageBox.information(self, "Sukces", "Projekty zostały zapisane.")
+                with open(path, 'r', encoding='utf-8') as f:
+                    code = f.read()
+                filename = os.path.basename(path)  # Pobranie nazwy pliku
+                self.add_new_tab(code, filename)
+                # Przechowywanie ścieżki pliku
+                current_index = self.tab_widget.currentIndex()
+                self.tab_paths[current_index] = path
             except Exception as e:
-                QMessageBox.critical(self, "Błąd", f"Nie udało się zapisać projektów: {e}")
+                QMessageBox.critical(
+                    self, "Błąd", f"Nie można otworzyć pliku:\n{e}")
 
-    # ---------------------------------------------
-    #           Wczytywanie projektów
-    # ---------------------------------------------
-    def load_projects(self):
-        options = QFileDialog.Options()
-        file_name, _ = QFileDialog.getOpenFileName(
-            self, "Wczytaj projekty", "", "JSON Files (*.json)", options=options
-        )
-        if file_name:
-            try:
-                with open(file_name, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                self.projects = [Project.from_dict(proj_data) for proj_data in data.get('projects', [])]
-                self.background_images = data.get('background_images', [])
-                self.current_theme = data.get('current_theme', self.current_theme)
-                self.custom_theme = data.get('custom_theme', {})
-                self.interface_settings = data.get('interface_settings', self.interface_settings)
-                self.apply_theme(self.current_theme)
-                self.theme_dropdown.setCurrentText(self.current_theme)
-                self.refresh_project_list()
-                self.refresh_task_list()
-                self.refresh_background_images()
-                self.update_interface()
-                QMessageBox.information(self, "Sukces", "Projekty zostały wczytane.")
-            except Exception as e:
-                QMessageBox.critical(self, "Błąd", f"Nie udało się wczytać projektów: {e}")
-
-    # ---------------------------------------------
-    #           Eksport zadań do CSV
-    # ---------------------------------------------
-    def export_tasks_to_csv(self):
-        if not self.current_project:
-            QMessageBox.warning(self, "Brak projektu", "Wybierz projekt do eksportu zadań.")
-            return
-
-        file_name, _ = QFileDialog.getSaveFileName(self, "Eksportuj zadania", "", "CSV Files (*.csv)")
-        if file_name:
-            try:
-                with open(file_name, 'w', newline='', encoding='utf-8') as csvfile:
-                    writer = csv.writer(csvfile)
-                    writer.writerow(['Tytuł', 'Opis', 'Data', 'Priorytet', 'Status', 'Tagi'])
-                    for task in self.current_project.tasks:
-                        writer.writerow([
-                            task.title,
-                            task.description,
-                            task.due_date.toString(Qt.DateFormat.ISODate),
-                            task.priority,
-                            task.status,
-                            ','.join(task.tags)
-                        ])
-                QMessageBox.information(self, "Sukces", "Zadania zostały wyeksportowane do CSV.")
-            except Exception as e:
-                QMessageBox.critical(self, "Błąd", f"Nie udało się wyeksportować zadań: {e}")
-
-    # ---------------------------------------------
-    #    Pokazanie menu kontekstowego dla zadań
-    # ---------------------------------------------
-    def show_task_context_menu(self, position):
-        menu = QMenu()
-        if self.interface_settings['show_images']:
-            manage_images_action = QAction("Zarządzaj obrazami zadania", self)
-            manage_images_action.triggered.connect(self.manage_task_images)
-            menu.addAction(manage_images_action)
-
-        delete_task_action = QAction("Usuń zadanie", self)
-        delete_task_action.triggered.connect(self.delete_task)
-
-        menu.addAction(delete_task_action)
-        menu.exec(self.task_list.viewport().mapToGlobal(position))
-
-    # ---------------------------------------------
-    #  Pokazanie menu kontekstowego dla projektów
-    # ---------------------------------------------
-    def show_project_context_menu(self, position):
-        menu = QMenu()
-        delete_project_action = QAction("Usuń projekt", self)
-        delete_project_action.triggered.connect(self.delete_project)
-
-        menu.addAction(delete_project_action)
-        menu.exec(self.project_list.viewport().mapToGlobal(position))
-
-    # ---------------------------------------------
-    #          Zarządzanie obrazami zadania
-    # ---------------------------------------------
-    def manage_task_images(self):
-        selected_item = self.task_list.currentItem()
-        if not selected_item:
-            QMessageBox.warning(self, "Brak wyboru", "Wybierz zadanie.")
-            return
-
-        index = self.task_list.row(selected_item)
-        task = self.current_project.tasks[index]
-
-        dialog = ImageManagerDialog(task.images, "Obrazy zadania")
-        dialog.exec()
-
-    # ---------------------------------------------
-    #         Zarządzanie obrazami planera
-    # ---------------------------------------------
-    def manage_background_images(self):
-        dialog = ImageManagerDialog(self.background_images, "Obrazy planera", refresh_callback=self.refresh_background_images)
-        dialog.exec()
-
-    # ---------------------------------------------
-    #   Odświeżanie galerii obrazów planera
-    # ---------------------------------------------
-    def refresh_background_images(self):
-        pass  # Implementacja odświeżania galerii
-
-    # ---------------------------------------------
-    #    Obsługa przeciągania plików do aplikacji
-    # ---------------------------------------------
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-
-    def dropEvent(self, event):
-        for url in event.mimeData().urls():
-            file_path = url.toLocalFile()
-            if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
-                self.background_images.append(file_path)
-                self.refresh_background_images()
-
-    # ---------------------------------------------
-    #    Dodawanie obrazu do zadania z dysku
-    # ---------------------------------------------
-    def add_image_from_disk(self):
-        selected_item = self.task_list.currentItem()
-        if not selected_item:
-            QMessageBox.warning(self, "Brak wyboru", "Wybierz zadanie.")
-            return
-
-        task_index = self.task_list.row(selected_item)
-        task = self.current_project.tasks[task_index]
-
-        file_dialog = QFileDialog()
-        file_names, _ = file_dialog.getOpenFileNames(
-            self, "Wybierz obrazy", "", "Obrazy (*.png *.jpg *.jpeg *.bmp *.gif)"
-        )
-        if file_names:
-            task.images.extend(file_names)
-            QMessageBox.information(self, "Sukces", "Obrazy zostały dodane do zadania.")
-
-    # ---------------------------------------------
-    #     Dodawanie obrazu do zadania z URL
-    # ---------------------------------------------
-    def add_image_from_url(self):
-        selected_item = self.task_list.currentItem()
-        if not selected_item:
-            QMessageBox.warning(self, "Brak wyboru", "Wybierz zadanie.")
-            return
-
-        task_index = self.task_list.row(selected_item)
-        task = self.current_project.tasks[task_index]
-
-        url, ok = QInputDialog.getText(self, "Dodaj obraz z URL", "Wprowadź URL obrazu:")
-        if ok and url:
-            self.download_and_add_image(url, task.images)
-
-    # ---------------------------------------------
-    #    Pobieranie obrazu z URL i dodawanie
-    # ---------------------------------------------
-    def download_and_add_image(self, url, image_list):
-        try:
-            response = requests.get(url)
-            if response.status_code == 200:
-                image_data = response.content
-                image_name = os.path.basename(url)
-                save_path = os.path.join(os.getcwd(), image_name)
-                with open(save_path, 'wb') as f:
-                    f.write(image_data)
-                image_list.append(save_path)
-                QMessageBox.information(self, "Sukces", "Obraz został pobrany i dodany.")
+    def save_file(self):
+        editor = self.get_current_editor()
+        if editor:
+            current_index = self.tab_widget.currentIndex()
+            file_path = self.tab_paths.get(current_index)
+            if file_path is None:
+                self.save_file_as()
             else:
-                QMessageBox.warning(self, "Błąd", "Nie udało się pobrać obrazu z podanego URL.")
+                self.save_to_path(file_path, editor.toPlainText())
+
+    def save_file_as(self):
+        editor = self.get_current_editor()
+        if editor:
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Zapisz plik jako", "", "Python Files (*.py);;JavaScript Files (*.js);;C++ Files (*.cpp *.hpp);;Go Files (*.go);;All Files (*)")
+            if path:
+                try:
+                    with open(path, 'w', encoding='utf-8') as f:
+                        f.write(editor.toPlainText())
+                    filename = os.path.basename(path)
+                    current_index = self.tab_widget.currentIndex()
+                    self.tab_widget.setTabText(current_index, filename)
+                    # Aktualizacja ścieżki pliku
+                    self.tab_paths[current_index] = path
+                    QMessageBox.information(
+                        self, "Zapisano", f"Plik zapisano: {path}")
+                except Exception as e:
+                    QMessageBox.critical(
+                        self, "Błąd", f"Nie można zapisać pliku:\n{e}")
+
+    def save_to_path(self, path, code):
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(code)
+            QMessageBox.information(self, "Zapisano", f"Plik zapisano: {path}")
         except Exception as e:
-            QMessageBox.critical(self, "Błąd", f"Wystąpił błąd podczas pobierania obrazu: {e}")
+            QMessageBox.critical(
+                self, "Błąd", f"Nie można zapisać pliku:\n{e}")
 
-    # ---------------------------------------------
-    #         Wyszukiwanie zadań
-    # ---------------------------------------------
-    def search_tasks(self, text):
-        if not self.current_project:
-            return
+    def export_to_html(self):
+        editor = self.get_current_editor()
+        if editor:
+            code = editor.toPlainText()
+            language = editor.highlighter.lexer.name.lower()
+            lexer = get_lexer_by_name(language)
+            formatter = pygments.formatters.HtmlFormatter(
+                full=True, linenos=True, style='friendly')
+            html_code = pygments.highlight(code, lexer, formatter)
 
-        filtered_tasks = [
-            task for task in self.current_project.tasks
-            if text.lower() in task.title.lower()
-            or text.lower() in task.description.lower()
-            or any(text.lower() in tag.lower() for tag in task.tags)
-        ]
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Eksportuj do HTML", "", "HTML Files (*.html);;All Files (*)")
+            if path:
+                try:
+                    with open(path, 'w', encoding='utf-8') as f:
+                        f.write(html_code)
+                    QMessageBox.information(
+                        self, "Eksport", f"Projekt wyeksportowany do HTML: {path}")
+                except Exception as e:
+                    QMessageBox.critical(
+                        self, "Eksport Błąd", f"Nie można wyeksportować do HTML:\n{e}")
 
-        self.task_list.clear()
-        for task in filtered_tasks:
-            item = QListWidgetItem(f"{task.title} ({task.status})")
-            item.setData(Qt.ItemDataRole.UserRole, task)
-            item.setFont(QFont('Arial', 12))
-            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.task_list.addItem(item)
+    def export_to_pdf(self):
+        editor = self.get_current_editor()
+        if editor:
+            code = editor.toPlainText()
+            language = editor.highlighter.lexer.name.lower()
+            lexer = get_lexer_by_name(language)
+            formatter = pygments.formatters.HtmlFormatter(
+                full=True, linenos=True, style='friendly')
+            html_code = pygments.highlight(code, lexer, formatter)
 
-    # ---------------------------------------------
-    #         Sortowanie zadań
-    # ---------------------------------------------
-    def sort_tasks(self, criterion):
-        if not self.current_project:
-            return
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Eksportuj do PDF", "", "PDF Files (*.pdf);;All Files (*)")
+            if path:
+                try:
+                    # Konwertuj HTML do PDF
+                    pdfkit.from_string(html_code, path)
+                    QMessageBox.information(
+                        self, "Eksport", f"Projekt wyeksportowany do PDF: {path}")
+                except Exception as e:
+                    QMessageBox.critical(
+                        self, "Eksport Błąd", f"Nie można wyeksportować do PDF:\n{e}")
 
-        if criterion == 'Priorytet':
-            priority_order = {'Niski': 1, 'Średni': 2, 'Wysoki': 3}
-            self.current_project.tasks.sort(key=lambda task: priority_order.get(task.priority, 0))
-        elif criterion == 'Status':
-            status_order = {'Do zrobienia': 1, 'W trakcie': 2, 'Zakończone': 3}
-            self.current_project.tasks.sort(key=lambda task: status_order.get(task.status, 0))
-        elif criterion == 'Data':
-            self.current_project.tasks.sort(key=lambda task: task.due_date)
-        self.refresh_task_list()
+    def run_code(self):
+        editor = self.get_current_editor()
+        if editor:
+            code = editor.toPlainText()
+            language = editor.highlighter.lexer.name.lower()
+            try:
+                # Zapisz tymczasowy plik
+                if language == 'python':
+                    temp_file = "temp_script.py"
+                elif language == 'javascript':
+                    temp_file = "temp_script.js"
+                elif language == 'cpp':
+                    temp_file = "temp_script.cpp"
+                elif language == 'go':
+                    temp_file = "temp_script.go"
+                else:
+                    temp_file = "temp_script.py"  # Domyślny interpreter
 
-    # ---------------------------------------------
-    #      Wyświetlanie zadań na wybraną datę
-    # ---------------------------------------------
-    def show_tasks_on_date(self):
-        if not self.current_project:
-            return
+                with open(temp_file, 'w', encoding='utf-8') as f:
+                    f.write(code)
 
-        selected_date = self.calendar.selectedDate()
-        tasks_on_date = [
-            task for task in self.current_project.tasks
-            if task.due_date.date() == selected_date
-        ]
+                # Uruchom skrypt
+                process = QProcess(self)
+                if language == 'python':
+                    interpreter = self.python_interpreter
+                    args = [temp_file]
+                elif language == 'javascript':
+                    interpreter = 'node'  # Upewnij się, że Node.js jest zainstalowany
+                    args = [temp_file]
+                elif language == 'cpp':
+                    # Kompilacja i uruchomienie C++
+                    executable = "temp_script.exe" if sys.platform == 'win32' else "./temp_script"
+                    compile_process = subprocess.run(
+                        ['g++', temp_file, '-o', 'temp_script'], capture_output=True, text=True)
+                    if compile_process.returncode != 0:
+                        self.output.appendPlainText(">>> Błąd kompilacji:")
+                        self.output.appendPlainText(compile_process.stderr)
+                        return
+                    interpreter = executable
+                    args = []
+                elif language == 'go':
+                    # Kompilacja i uruchomienie Go
+                    executable = "temp_script" if sys.platform != 'win32' else "temp_script.exe"
+                    compile_process = subprocess.run(
+                        ['go', 'build', '-o', executable, temp_file], capture_output=True, text=True)
+                    if compile_process.returncode != 0:
+                        self.output.appendPlainText(">>> Błąd kompilacji:")
+                        self.output.appendPlainText(compile_process.stderr)
+                        return
+                    interpreter = os.path.abspath(executable)
+                    args = []
+                else:
+                    interpreter = self.python_interpreter
+                    args = [temp_file]
 
-        self.task_list.clear()
-        for task in tasks_on_date:
-            item = QListWidgetItem(f"{task.title} ({task.status})")
-            item.setData(Qt.ItemDataRole.UserRole, task)
-            item.setFont(QFont('Arial', 12))
-            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.task_list.addItem(item)
+                process.setProgram(interpreter)
+                process.setArguments(args)
+                process.start()
+                process.waitForFinished()
 
-    # ---------------------------------------------
-    #          Ustawienie powiadomień
-    # ---------------------------------------------
-    def setup_notifications(self):
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.check_deadlines)
-        self.timer.start(3600000)  # Sprawdzaj co godzinę
+                output = process.readAllStandardOutput().data().decode()
+                error = process.readAllStandardError().data().decode()
 
-    # ---------------------------------------------
-    #            Sprawdzanie terminów
-    # ---------------------------------------------
-    def check_deadlines(self):
-        for project in self.projects:
-            for task in project.tasks:
-                if task.due_date <= QDateTime.currentDateTime().addSecs(86400) and task.status != 'Zakończone':
-                    QMessageBox.warning(self, "Nadchodzący termin", f"Zadanie '{task.title}' w projekcie '{project.name}' ma termin w ciągu 24 godzin.")
+                if output:
+                    self.output.appendPlainText(">>> Wynik:")
+                    self.output.appendPlainText(output)
+                if error:
+                    self.output.appendPlainText(">>> Błąd:")
+                    self.output.appendPlainText(error)
+            except Exception as e:
+                QMessageBox.critical(
+                    self, "Błąd", f"Nie można uruchomić skryptu:\n{e}")
 
-    # ---------------------------------------------
-    #        Aktualizacja postępu projektu
-    # ---------------------------------------------
-    def update_project_progress(self):
-        if not self.current_project:
-            self.project_progress_bar.setValue(0)
-            return
+    def debug_code(self):
+        editor = self.get_current_editor()
+        if editor:
+            code = editor.toPlainText()
+            language = editor.highlighter.lexer.name.lower()
+            if language != 'python':
+                QMessageBox.warning(
+                    self,
+                    "Debugowanie",
+                    "Debugowanie jest obecnie dostępne tylko dla Pythona.")
+                return
 
-        total_tasks = len(self.current_project.tasks)
-        if total_tasks == 0:
-            self.project_progress_bar.setValue(0)
-            return
+            temp_file = "temp_debug_script.py"
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                f.write(code)
 
-        completed_tasks = len([task for task in self.current_project.tasks if task.status == 'Zakończone'])
-        progress = int((completed_tasks / total_tasks) * 100)
-        self.project_progress_bar.setValue(progress)
+            try:
+                # Sprawdź, czy debugpy jest zainstalowany
+                subprocess.run([self.python_interpreter,
+                                '-m',
+                                'debugpy',
+                                '--version'],
+                               check=True,
+                               stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+            except subprocess.CalledProcessError:
+                QMessageBox.critical(
+                    self,
+                    "Debugowanie Błąd",
+                    "Moduł debugpy nie jest zainstalowany.")
+                return
+            except FileNotFoundError:
+                QMessageBox.critical(
+                    self,
+                    "Debugowanie Błąd",
+                    "Interpreter Python nie został znaleziony.")
+                return
 
-    # ---------------------------------------------
-    #          Edycja wybranego zadania
-    # ---------------------------------------------
-    def edit_task(self):
-        selected_item = self.task_list.currentItem()
-        if selected_item:
-            self.display_task_details(selected_item)
-        else:
-            QMessageBox.warning(self, "Brak wyboru", "Wybierz zadanie do edycji.")
+            try:
+                # Uruchomienie debuggera w osobnym procesie
+                self.debugger = QProcess(self)
+                self.debugger.setProgram(self.python_interpreter)
+                self.debugger.setArguments([
+                    "-m", "debugpy",
+                    "--listen", "5678",
+                    "--wait-for-client",
+                    temp_file
+                ])
+                self.debugger.start()
+                if not self.debugger.waitForStarted(3000):
+                    QMessageBox.critical(
+                        self, "Debugowanie Błąd", "Nie można uruchomić debuggera.")
+                    return
+                QMessageBox.information(
+                    self,
+                    "Debugowanie",
+                    "Debugger uruchomiony. Podłącz się do portu 5678 za pomocą klienta debuggera (np. VSCode).")
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Debugowanie Błąd",
+                    f"Nie można uruchomić debuggera:\n{e}")
 
-# ---------------------------------------------
-#       Klasa dialogu ustawień
-# ---------------------------------------------
-class SettingsDialog(QDialog):
-    def __init__(self, custom_theme, interface_settings):
-        super().__init__()
-        self.setWindowTitle("Ustawienia")
-        self.resize(500, 500)
+    def run_tests(self):
+        editor = self.get_current_editor()
+        if editor:
+            code = editor.toPlainText()
+            language = editor.highlighter.lexer.name.lower()
+            if language != 'python':
+                QMessageBox.warning(
+                    self,
+                    "Testowanie",
+                    "Testowanie jest dostępne tylko dla Pythona.")
+                return
 
-        self.custom_theme = custom_theme.copy()
-        self.interface_settings = interface_settings.copy()
-        self.theme_changed = False
+            temp_file = "temp_test_script.py"
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                f.write(code)
 
-        self.initUI()
+            try:
+                # Uruchomienie testów
+                test_output = io.StringIO()
+                with contextlib.redirect_stdout(test_output):
+                    loader = unittest.TestLoader()
+                    suite = loader.discover('.', pattern='temp_test_script.py')
+                    runner = unittest.TextTestRunner(
+                        stream=test_output, verbosity=2)
+                    runner.run(suite)
 
-    def initUI(self):
-        layout = QVBoxLayout()
-        self.setLayout(layout)
+                output = test_output.getvalue()
+                self.output.appendPlainText(">>> Testy:")
+                self.output.appendPlainText(output)
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Testowanie Błąd",
+                    f"Wystąpił błąd podczas uruchamiania testów:\n{e}")
 
-        # Zakładki
-        tabs = QTabWidget()
-        layout.addWidget(tabs)
+    def set_flake8_config(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Wybierz plik konfiguracyjny Flake8", "", "Config Files (*.ini *.cfg *.toml);;All Files (*)")
+        if path:
+            self.flake8_config = path
+            QMessageBox.information(
+                self,
+                "Konfiguracja Flake8",
+                f"Załadowano konfigurację: {self.flake8_config}")
 
-        # Dodanie ikon do zakładek
-        theme_icon = QIcon("theme_icon.png")
-        interface_icon = QIcon("interface_icon.png")
+    def select_interpreter(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Wybierz interpreter Pythona", "", "Python Executable (*.exe);;All Files (*)")
+        if path:
+            self.python_interpreter = path
+            QMessageBox.information(
+                self,
+                "Interpreter",
+                f"Wybrano interpreter: {self.python_interpreter}")
 
-        # Zakładka motywu
-        theme_tab = QWidget()
-        theme_layout = QVBoxLayout()
-        theme_tab.setLayout(theme_layout)
+    # Operacje Git
+    def git_commit(self):
+        try:
+            repo = git.Repo(self.git_repo_path)
+            commit_message, ok = QInputDialog.getText(
+                self, 'Commit', 'Wpisz wiadomość commit:')
+            if ok and commit_message:
+                repo.git.add('--all')
+                repo.index.commit(commit_message)
+                QMessageBox.information(self, "Commit", "Zatwierdzono zmiany.")
+        except git.exc.InvalidGitRepositoryError:
+            QMessageBox.critical(
+                self,
+                "Git Błąd",
+                "Nie znaleziono repozytorium Git w wybranym katalogu.")
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Git Błąd", f"Wystąpił błąd podczas commitowania: {e}")
 
-        # Przyciski do wyboru kolorów
-        self.background_color_button = QPushButton("Kolor tła")
-        self.background_color_button.clicked.connect(self.choose_background_color)
+    def git_push(self):
+        try:
+            repo = git.Repo(self.git_repo_path)
+            origin = repo.remote(name='origin')
+            origin.push()
+            QMessageBox.information(
+                self, "Push", "Zmiany zostały wypchnięte na GitHub.")
+        except git.exc.InvalidGitRepositoryError:
+            QMessageBox.critical(
+                self,
+                "Git Błąd",
+                "Nie znaleziono repozytorium Git w wybranym katalogu.")
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Git Błąd", f"Wystąpił błąd podczas pushowania: {e}")
 
-        self.text_color_button = QPushButton("Kolor tekstu")
-        self.text_color_button.clicked.connect(self.choose_text_color)
+    def git_pull(self):
+        try:
+            repo = git.Repo(self.git_repo_path)
+            origin = repo.remote(name='origin')
+            origin.pull()
+            QMessageBox.information(
+                self, "Pull", "Zmiany zostały pobrane z GitHub.")
+        except git.exc.InvalidGitRepositoryError:
+            QMessageBox.critical(
+                self,
+                "Git Błąd",
+                "Nie znaleziono repozytorium Git w wybranym katalogu.")
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Git Błąd", f"Wystąpił błąd podczas pullowania: {e}")
 
-        self.button_color_button = QPushButton("Kolor przycisków")
-        self.button_color_button.clicked.connect(self.choose_button_color)
+    def git_create_branch(self):
+        try:
+            repo = git.Repo(self.git_repo_path)
+            branch_name, ok = QInputDialog.getText(
+                self, 'Create Branch', 'Wpisz nazwę nowego brancha:')
+            if ok and branch_name:
+                repo.git.checkout('-b', branch_name)
+                QMessageBox.information(
+                    self, "Branch", f"Utworzono i przełączono na branch: {branch_name}")
+        except git.exc.InvalidGitRepositoryError:
+            QMessageBox.critical(
+                self,
+                "Git Błąd",
+                "Nie znaleziono repozytorium Git w wybranym katalogu.")
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Git Błąd",
+                f"Wystąpił błąd podczas tworzenia brancha: {e}")
 
-        self.hover_color_button = QPushButton("Kolor po najechaniu")
-        self.hover_color_button.clicked.connect(self.choose_hover_color)
+    def git_merge_branch(self):
+        try:
+            repo = git.Repo(self.git_repo_path)
+            branches = [head.name for head in repo.heads]
+            branch, ok = QInputDialog.getItem(
+                self, "Merge Branch", "Wybierz branch do mergowania:", branches, 0, False)
+            if ok and branch:
+                current = repo.active_branch.name
+                repo.git.merge(branch)
+                QMessageBox.information(
+                    self, "Merge", f"Branch {branch} został zmergowany z {current}.")
+        except git.exc.InvalidGitRepositoryError:
+            QMessageBox.critical(
+                self,
+                "Git Błąd",
+                "Nie znaleziono repozytorium Git w wybranym katalogu.")
+        except git.exc.GitCommandError as e:
+            QMessageBox.critical(
+                self, "Git Błąd", f"Wystąpił błąd podczas mergowania: {e}")
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Git Błąd", f"Wystąpił błąd podczas mergowania: {e}")
 
-        self.task_item_background_button = QPushButton("Kolor tła elementów")
-        self.task_item_background_button.clicked.connect(self.choose_task_item_background_color)
+    def git_show_log(self):
+        try:
+            repo = git.Repo(self.git_repo_path)
+            logs = repo.git.log('--oneline', '--graph', '--all')
+            log_dialog = QDialog(self)
+            log_dialog.setWindowTitle("Log Commitów")
+            layout = QVBoxLayout()
+            log_text = QPlainTextEdit()
+            log_text.setReadOnly(True)
+            log_text.setPlainText(logs)
+            layout.addWidget(log_text)
+            log_dialog.setLayout(layout)
+            log_dialog.resize(600, 400)
+            log_dialog.exec()
+        except git.exc.InvalidGitRepositoryError:
+            QMessageBox.critical(
+                self,
+                "Git Błąd",
+                "Nie znaleziono repozytorium Git w wybranym katalogu.")
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Git Błąd",
+                f"Wystąpił błąd podczas pobierania logów: {e}")
 
-        self.task_item_text_color_button = QPushButton("Kolor tekstu elementów")
-        self.task_item_text_color_button.clicked.connect(self.choose_task_item_text_color)
+    def select_git_repo(self):
+        path = QFileDialog.getExistingDirectory(
+            self, "Wybierz Repozytorium Git", "")
+        if path:
+            try:
+                repo = git.Repo(path)
+                self.git_repo_path = path
+                QMessageBox.information(
+                    self, "Git Repo", f"Wybrane repozytorium: {path}")
+            except git.exc.InvalidGitRepositoryError:
+                QMessageBox.critical(
+                    self, "Git Błąd", "Wybrany folder nie jest repozytorium Git.")
 
-        theme_layout.addWidget(self.background_color_button)
-        theme_layout.addWidget(self.text_color_button)
-        theme_layout.addWidget(self.button_color_button)
-        theme_layout.addWidget(self.hover_color_button)
-        theme_layout.addWidget(self.task_item_background_button)
-        theme_layout.addWidget(self.task_item_text_color_button)
-        theme_layout.addStretch()
 
-        # Zakładka interfejsu
-        interface_tab = QWidget()
-        interface_layout = QVBoxLayout()
-        interface_tab.setLayout(interface_layout)
-
-        self.show_description_checkbox = QCheckBox("Pokaż pole opisu")
-        self.show_description_checkbox.setChecked(self.interface_settings['show_description'])
-
-        self.show_notes_checkbox = QCheckBox("Pokaż pole notatek")
-        self.show_notes_checkbox.setChecked(self.interface_settings['show_notes'])
-
-        self.show_due_date_checkbox = QCheckBox("Pokaż pole daty")
-        self.show_due_date_checkbox.setChecked(self.interface_settings['show_due_date'])
-
-        self.show_tags_checkbox = QCheckBox("Pokaż pole tagów")
-        self.show_tags_checkbox.setChecked(self.interface_settings['show_tags'])
-
-        self.show_priority_checkbox = QCheckBox("Pokaż pole priorytetu")
-        self.show_priority_checkbox.setChecked(self.interface_settings['show_priority'])
-
-        self.show_status_checkbox = QCheckBox("Pokaż pole statusu")
-        self.show_status_checkbox.setChecked(self.interface_settings['show_status'])
-
-        self.show_images_checkbox = QCheckBox("Pokaż przyciski obrazów")
-        self.show_images_checkbox.setChecked(self.interface_settings['show_images'])
-
-        self.show_instructions_checkbox = QCheckBox("Pokaż panel instrukcji")
-        self.show_instructions_checkbox.setChecked(self.interface_settings['show_instructions'])
-
-        # Nowe checkboxy do ukrywania sekcji
-        self.show_projects_section_checkbox = QCheckBox("Pokaż sekcję projektów")
-        self.show_projects_section_checkbox.setChecked(self.interface_settings['show_projects_section'])
-
-        self.show_tasks_section_checkbox = QCheckBox("Pokaż sekcję zadań")
-        self.show_tasks_section_checkbox.setChecked(self.interface_settings['show_tasks_section'])
-
-        interface_layout.addWidget(self.show_description_checkbox)
-        interface_layout.addWidget(self.show_notes_checkbox)
-        interface_layout.addWidget(self.show_due_date_checkbox)
-        interface_layout.addWidget(self.show_tags_checkbox)
-        interface_layout.addWidget(self.show_priority_checkbox)
-        interface_layout.addWidget(self.show_status_checkbox)
-        interface_layout.addWidget(self.show_images_checkbox)
-        interface_layout.addWidget(self.show_instructions_checkbox)
-        interface_layout.addWidget(self.show_projects_section_checkbox)
-        interface_layout.addWidget(self.show_tasks_section_checkbox)
-        interface_layout.addStretch()
-
-        # Dodanie zakładek z ikonami
-        tabs.addTab(theme_tab, theme_icon, "Motyw")
-        tabs.addTab(interface_tab, interface_icon, "Interfejs")
-
-        # Przyciski akcji
-        buttons_layout = QHBoxLayout()
-        self.save_button = QPushButton("Zapisz")
-        self.save_button.clicked.connect(self.accept)
-
-        self.cancel_button = QPushButton("Anuluj")
-        self.cancel_button.clicked.connect(self.reject)
-
-        buttons_layout.addStretch()
-        buttons_layout.addWidget(self.save_button)
-        buttons_layout.addWidget(self.cancel_button)
-
-        layout.addLayout(buttons_layout)
-
-        # Stylizacja okna ustawień
-        self.setStyleSheet("""
-            QDialog {{
-                background-color: {bg_color};
-            }}
-            QPushButton {{
-                background-color: {btn_color};
-                color: #ffffff;
-                border-radius: 5px;
-                padding: 10px;
-            }}
-            QPushButton:hover {{
-                background-color: {hover_color};
-            }}
-            QCheckBox {{
-                font-size: 14px;
-                color: {text_color};
-            }}
-            QTabWidget::pane {{
-                border: 1px solid {btn_color};
-            }}
-            QTabBar::tab {{
-                background: {bg_color};
-                color: {text_color};
-                padding: 10px;
-            }}
-            QTabBar::tab:selected {{
-                background: {btn_color};
-                color: #ffffff;
-            }}
-        """.format(
-            bg_color=self.custom_theme.get('background_color', '#ffe4e1'),
-            btn_color=self.custom_theme.get('button_color', '#ff69b4'),
-            hover_color=self.custom_theme.get('hover_color', '#ff1493'),
-            text_color=self.custom_theme.get('text_color', '#8b0000')
-        ))
-
-    def choose_background_color(self):
-        color = QColorDialog.getColor()
-        if color.isValid():
-            self.custom_theme['background_color'] = color.name()
-            self.theme_changed = True
-
-    def choose_text_color(self):
-        color = QColorDialog.getColor()
-        if color.isValid():
-            self.custom_theme['text_color'] = color.name()
-            self.theme_changed = True
-
-    def choose_button_color(self):
-        color = QColorDialog.getColor()
-        if color.isValid():
-            self.custom_theme['button_color'] = color.name()
-            self.theme_changed = True
-
-    def choose_hover_color(self):
-        color = QColorDialog.getColor()
-        if color.isValid():
-            self.custom_theme['hover_color'] = color.name()
-            self.theme_changed = True
-
-    def choose_task_item_background_color(self):
-        color = QColorDialog.getColor()
-        if color.isValid():
-            self.custom_theme['task_item_background'] = color.name()
-            self.theme_changed = True
-
-    def choose_task_item_text_color(self):
-        color = QColorDialog.getColor()
-        if color.isValid():
-            self.custom_theme['task_item_text_color'] = color.name()
-            self.theme_changed = True
-
-    def get_custom_theme(self):
-        return self.custom_theme
-
-    def get_interface_settings(self):
-        return {
-            'show_description': self.show_description_checkbox.isChecked(),
-            'show_notes': self.show_notes_checkbox.isChecked(),
-            'show_due_date': self.show_due_date_checkbox.isChecked(),
-            'show_tags': self.show_tags_checkbox.isChecked(),
-            'show_priority': self.show_priority_checkbox.isChecked(),
-            'show_status': self.show_status_checkbox.isChecked(),
-            'show_images': self.show_images_checkbox.isChecked(),
-            'show_instructions': self.show_instructions_checkbox.isChecked(),
-            'show_projects_section': self.show_projects_section_checkbox.isChecked(),
-            'show_tasks_section': self.show_tasks_section_checkbox.isChecked()
-        }
-
-# ---------------------------------------------
-#       Klasa dialogu zarządzania obrazami
-# ---------------------------------------------
-# (Pozostaje bez zmian)
-
-# ---------------------------------------------
-#          Uruchomienie aplikacji
-# ---------------------------------------------
-if __name__ == "__main__":
+def main():
     app = QApplication(sys.argv)
-    window = TaskManagerApp()
+    window = MainWindow()
     window.show()
     sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

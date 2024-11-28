@@ -293,9 +293,10 @@ class CodeEditor(QPlainTextEdit):
 
         super().keyPressEvent(event)
 
-        # Autouzupełnianie po wywołaniu super()
+        # Uruchomienie opóźnionego autouzupełniania
         if event.text().isidentifier() or event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
-            self.completion_timer.start()  # Uruchom timer zamiast wywoływać natychmiast
+            # Opóźnienie na 2000ms (2 sekundy), zmień wedle potrzeby
+            self.completion_timer.start(2000)  # Opóźnienie wywołania autouzupełniania na 2 sekundy
 
     def accept_completion(self):
         selected_item = self.completion_list.currentItem()
@@ -536,12 +537,6 @@ class CodeEditor(QPlainTextEdit):
             super().mouseMoveEvent(event)
 
     def show_completions(self):
-        settings = self.get_settings()  # Pobieramy ustawienia
-
-        # Sprawdzamy, czy autouzupełnianie na żądanie jest włączone
-        if settings.get('autocomplete_on_demand'):
-            return  # Jeśli tak, nie robimy nic, czekamy na ręczne wywołanie
-
         try:
             cursor = self.textCursor()
             cursor.select(QTextCursor.SelectionType.WordUnderCursor)
@@ -598,7 +593,7 @@ class CodeEditor(QPlainTextEdit):
         except Exception as e:
             print(f"Autouzupełnianie błędów: {e}")
             self.completion_list.hide()
-
+            
     def complete_text(self, item):
         cursor = self.textCursor()
         cursor.select(QTextCursor.SelectionType.WordUnderCursor)
@@ -606,6 +601,11 @@ class CodeEditor(QPlainTextEdit):
         cursor.insertText(item.text())
         self.setTextCursor(cursor)
         self.completion_list.hide()
+
+    def accept_completion(self):
+        selected_item = self.completion_list.currentItem()
+        if selected_item:
+            self.complete_text(selected_item)
             
 class CodeNavigatorPanel(QWidget):
     def __init__(self, main_window):
@@ -717,24 +717,19 @@ class SettingsDialog(QDialog):
         save_button = QPushButton("Zapisz")
         save_button.clicked.connect(self.accept)
         layout.addWidget(save_button)
-# Opcja włączania/wyłączania autouzupełniania na żądanie
-        self.autocomplete_on_demand_checkbox = QCheckBox("Autouzupełnianie na żądanie")
-        self.autocomplete_on_demand_checkbox.setChecked(False)  # Domyślnie wyłączone
-        layout.addWidget(self.autocomplete_on_demand_checkbox)
 
         self.setLayout(layout)
 
-def get_settings(self):
-    return {
-        'clean_paste': self.clean_paste_checkbox.isChecked(),
-        'smart_indent': self.smart_indent_checkbox.isChecked(),
-        'confirm_delete': self.confirm_delete_checkbox.isChecked(),
-        'theme': self.theme_combo.currentText(),
-        'font_size': self.font_size_spin.value(),
-        'auto_save': self.auto_save_checkbox.isChecked(),
-        'focus_mode': self.focus_mode_checkbox.isChecked(),
-        'autocomplete_on_demand': self.autocomplete_on_demand_checkbox.isChecked(),  
-    }
+    def get_settings(self):
+        return {
+            'clean_paste': self.clean_paste_checkbox.isChecked(),
+            'smart_indent': self.smart_indent_checkbox.isChecked(),
+            'confirm_delete': self.confirm_delete_checkbox.isChecked(),
+            'theme': self.theme_combo.currentText(),
+            'font_size': self.font_size_spin.value(),
+            'auto_save': self.auto_save_checkbox.isChecked(),
+            'focus_mode': self.focus_mode_checkbox.isChecked(),
+        }
 
 class MainWindow(QMainWindow):
     def __init__(self):

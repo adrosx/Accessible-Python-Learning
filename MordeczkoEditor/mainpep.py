@@ -823,7 +823,7 @@ class MainWindow(QMainWindow):
                 self.save_file_as()
             else:
                 self.save_to_path(file_path, editor.toPlainText())
-
+u
     def save_file_as(self):
         editor = self.get_current_editor()
         if editor:
