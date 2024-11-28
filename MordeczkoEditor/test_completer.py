@@ -8,10 +8,13 @@ import logging
 from functools import wraps
 import io
 import contextlib
-import git
 import unittest
+import git
+
+import jedi
+
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QPlainTextEdit, QWidget, QVBoxLayout,
+    QApplication, QMainWindow, QPlainTextEdit, QTextEdit, QCompleter, QWidget, QVBoxLayout,
     QHBoxLayout, QDialog, QCheckBox, QLabel, QComboBox, QSpinBox,
     QPushButton, QFileDialog, QInputDialog, QMessageBox, QListWidget,
     QListWidgetItem, QSplitter, QTabWidget, QToolTip
@@ -22,13 +25,13 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtCore import (
     Qt, QRect, QProcess, pyqtSignal, QSize, QTimer, QObject, QThread,
-    QRegularExpression
+    QRegularExpression, QStringListModel
 )
+from PyQt6.QtWidgets import QToolTip
 from pygments import lex
 from pygments.lexers import get_lexer_by_name
 from pygments.styles import get_style_by_name
-from PyQt6.QtWidgets import QTextEdit
-import jedi
+
 
 # Konfiguracja logowania
 logging.basicConfig(
@@ -83,23 +86,6 @@ class LineNumberArea(QWidget):
 
     def paintEvent(self, event):
         self.code_editor.line_number_area_paint_event(event)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            y = event.position().y()
-            block = self.code_editor.firstVisibleBlock()
-            block_number = block.blockNumber()
-            top = int(self.code_editor.blockBoundingGeometry(block).translated(self.code_editor.contentOffset()).top())
-            bottom = top + int(self.code_editor.blockBoundingRect(block).height())
-
-            while block.isValid() and top <= y:
-                if block.isVisible() and bottom >= y:
-                    self.clicked.emit(block_number)
-                    break
-                block = block.next()
-                top = bottom
-                bottom = top + int(self.code_editor.blockBoundingRect(block).height())
-                block_number += 1
 
 class GenericHighlighter(QSyntaxHighlighter):
     def __init__(self, document, language='python'):
@@ -199,12 +185,17 @@ class CodeEditor(QPlainTextEdit):
             'focus_mode': False,
         }
 
-        # Autouzupełnianie
-        self.completion_list = QListWidget(self)
-        self.completion_list.setWindowFlags(Qt.WindowType.Popup)
-        self.completion_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.completion_list.itemClicked.connect(self.complete_text)
-        self.completion_list.hide()
+        # Autouzupełnianie z QCompleter
+        self.completer = QCompleter([], self)  # self odnosi się do CodeEditor
+        self.completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.completer.activated.connect(self.insert_completion)  # Poprawione połączenie
+
+        # Model dla QCompleter
+        self.completer_model = QStringListModel()
+        self.completer.setModel(self.completer_model)
+        self.completer.popup().setMinimumWidth(200)
+        self.completer.popup().setMinimumHeight(100)
 
         # Załaduj ikony raz
         self.function_icon = QIcon('assets/icons/function.png')
@@ -247,60 +238,65 @@ class CodeEditor(QPlainTextEdit):
             super().pasteEvent(event)
 
     def keyPressEvent(self, event):
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            if self.settings.get('smart_indent', True):
-                cursor = self.textCursor()
-                cursor.select(QTextCursor.SelectionType.LineUnderCursor)
-                current_line = cursor.selectedText()
+        try:
+            logging.debug(f"Key pressed: {event.key()}")
 
-                # Pobierz ilość spacji na początku linii
-                indentation = re.match(r'\s*', current_line).group()
-
-                # Jeśli linia kończy się dwukropkiem, dodaj dodatkowe wcięcie
-                if current_line.rstrip().endswith(':'):
-                    indentation += '    '
-
-                super().keyPressEvent(event)
-
-                # Dodaj wcięcie do nowej linii
-                cursor = self.textCursor()
-                cursor.insertText(indentation)
-                return
-        elif event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
-            if self.settings.get('confirm_delete', True):
-                reply = QMessageBox.question(self, 'Potwierdzenie Usunięcia',
-                                             'Czy na pewno chcesz usunąć ten fragment?',
-                                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                             QMessageBox.StandardButton.No)
-                if reply != QMessageBox.StandardButton.Yes:
-                    event.ignore()
+            # Sprawdź, czy lista autouzupełniania jest widoczna i czy naciśnięto klawisz Escape
+            if self.completer.popup().isVisible():
+                if event.key() == Qt.Key.Key_Escape:
+                    self.completer.popup().hide()
                     return
-        elif event.key() == Qt.Key.Key_F and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            self.show_find_dialog()
-            return
 
-        # Obsługa autouzupełniania przed wywołaniem super()
-        if self.completion_list.isVisible():
-            if event.key() == Qt.Key.Key_Tab:
-                self.accept_completion()
+            # Obsługa klawiszy specjalnych przed wywołaniem super()
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                if self.settings.get('smart_indent', True):
+                    cursor = self.textCursor()
+                    cursor.select(QTextCursor.SelectionType.LineUnderCursor)
+                    current_line = cursor.selectedText()
+
+                    # Pobierz ilość spacji na początku linii
+                    indentation = re.match(r'\s*', current_line).group()
+
+                    # Jeśli linia kończy się dwukropkiem, dodaj dodatkowe wcięcie
+                    if current_line.rstrip().endswith(':'):
+                        indentation += '    '
+
+                    super().keyPressEvent(event)
+
+                    # Dodaj wcięcie do nowej linii
+                    cursor = self.textCursor()
+                    cursor.insertText(indentation)
+                    logging.debug(f"Inserted indentation: '{indentation}'")
+                    return
+
+            # Usuwanie z potwierdzeniem
+            elif event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+                if self.settings.get('confirm_delete', True):
+                    reply = QMessageBox.question(
+                        self,
+                        'Potwierdzenie Usunięcia',
+                        'Czy na pewno chcesz usunąć ten fragment?',
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No,
+                    )
+                    if reply != QMessageBox.StandardButton.Yes:
+                        event.ignore()
+                        return
+
+            # Ctrl + F -> Wyszukiwarka
+            elif event.key() == Qt.Key.Key_F and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+                self.show_find_dialog()
                 return
-            elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                self.accept_completion()
-                return
-            elif event.key() == Qt.Key.Key_Escape:
-                self.completion_list.hide()
-                return
 
-        super().keyPressEvent(event)
+            # Wywołaj domyślną obsługę klawiszy
+            super().keyPressEvent(event)
 
-        # Autouzupełnianie po wywołaniu super()
-        if event.text().isidentifier() or event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
-            self.completion_timer.start()  # Uruchom timer zamiast wywoływać natychmiast
-
-    def accept_completion(self):
-        selected_item = self.completion_list.currentItem()
-        if selected_item:
-            self.complete_text(selected_item)
+            # Uruchamianie autouzupełniania po super()
+            if event.text().isidentifier() or event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+                self.completion_timer.start()  # Uruchom timer zamiast wywoływać natychmiast
+        except Exception as e:
+            logging.exception(f"keyPressEvent error: {e}")
+            super().keyPressEvent(event)
 
     def toggle_breakpoint(self, block_number):
         if block_number in self.breakpoints:
@@ -458,20 +454,19 @@ class CodeEditor(QPlainTextEdit):
         self.symbols_updated.emit(symbols)
 
     def extract_symbols(self, code):
-        """Ekstrakcja symboli funkcji i klas z kodu za pomocą modułu ast."""
+        """Ekstrakcja symboli funkcji i klas z kodu za pomocą modułu jedi."""
         functions = []
         classes = []
         try:
-            tree = ast.parse(code)
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef):
-                    # ast.lineno jest 1-based, QTextDocument blocks are 0-based
-                    functions.append((node.name, node.lineno - 1))
-                elif isinstance(node, ast.ClassDef):
-                    classes.append((node.name, node.lineno - 1))
-        except SyntaxError:
-            # Możesz tutaj obsłużyć błędy składniowe, jeśli to konieczne
-            pass
+            script = jedi.Script(code=code, path='temp.py')  # Ścieżka może być dowolna
+            definitions = script.get_names(all_scopes=True, definitions=True, references=False)
+            for name in definitions:
+                if name.type == 'function':
+                    functions.append((name.name, name.line - 1))  # 0-based indeks linii
+                elif name.type == 'class':
+                    classes.append((name.name, name.line - 1))
+        except Exception as e:
+            logging.error(f"Błąd ekstrakcji symboli za pomocą jedi: {e}")
         return {'functions': functions, 'classes': classes}
 
     def get_line_number(self, position, line_start_positions):
@@ -535,78 +530,56 @@ class CodeEditor(QPlainTextEdit):
             QToolTip.hideText()
             super().mouseMoveEvent(event)
 
+    def insert_completion(self, completion):
+        try:
+            logging.debug(f"Inserting completion: {completion}")
+            cursor = self.textCursor()
+            cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+            cursor.removeSelectedText()
+            cursor.insertText(completion)
+            self.setTextCursor(cursor)
+        except Exception as e:
+            logging.exception(f"Insert completion error: {e}")
+
     def show_completions(self):
-        settings = self.get_settings()  # Pobieramy ustawienia
-
-        # Sprawdzamy, czy autouzupełnianie na żądanie jest włączone
-        if settings.get('autocomplete_on_demand'):
-            return  # Jeśli tak, nie robimy nic, czekamy na ręczne wywołanie
-
         try:
             cursor = self.textCursor()
             cursor.select(QTextCursor.SelectionType.WordUnderCursor)
             prefix = cursor.selectedText()
-            print(f"Prefix: {prefix}")  # Debug
+
+            logging.debug(f"show_completions called with prefix: '{prefix}'")
 
             if not prefix:
-                self.completion_list.hide()
+                logging.debug("No prefix found, hiding completer popup.")
+                self.completer.popup().hide()
                 return
 
-            # Pobierz numer linii i kolumnę
-            block = cursor.block()
-            line = cursor.blockNumber() + 1  # 1-based line number
-            column = cursor.positionInBlock()  # 0-based column number
+            # Statyczne sugestie dla testów
+            static_completions = ["print", "input", "str", "int", "len", "list", "dict", "set"]
+            filtered_completions = [word for word in static_completions if word.startswith(prefix)]
+            self.completer_model.setStringList(filtered_completions)
 
-            # Pobierz całkowitą liczbę linii w dokumencie
-            total_lines = self.document().blockCount()
-            if line > total_lines:
-                line = total_lines
+            if filtered_completions:
+                self.completer.complete(self.cursorRect())  # Wyświetl listę sugestii
+                self.completer.popup().raise_()
+                logging.debug(f"Completions displayed: {filtered_completions}")
 
-            # Pobierz tekst bieżącej linii
-            current_block_text = block.text()
-            if column > len(current_block_text):
-                column = len(current_block_text)
-
-            print(f"Line: {line}, Column: {column}")  # Debug
-
-            # Inicjalizacja Jedi Script z prawidłową ścieżką
-            script = jedi.Script(code=self.toPlainText(), path='temp.py')
-            completions = script.complete(line, column)
-            print(f"Completions: {len(completions)}")  # Debug
-
-            if completions:
-                self.completion_list.clear()
-                for comp in completions:
-                    item = QListWidgetItem(comp.name)
-                    # Dodanie opisu do listy
-                    item.setToolTip(comp.description)
-                    # Dodanie ikon (załadowane wcześniej)
-                    if comp.type == 'function':
-                        item.setIcon(self.function_icon)
-                    elif comp.type == 'class':
-                        item.setIcon(self.class_icon)
-                    self.completion_list.addItem(item)
-
-                # Pozycjonowanie listy
-                cursor_rect = self.cursorRect()
-                list_pos = self.mapToGlobal(cursor_rect.bottomRight())
-                self.completion_list.move(list_pos)
-                self.completion_list.resize(200, min(150, self.completion_list.sizeHintForRow(0) * len(completions) + 2))
-                self.completion_list.show()
+                # Opcjonalnie: Wyświetl QToolTip z sugestiami
+                QToolTip.showText(self.mapToGlobal(self.cursorRect().bottomRight()), ", ".join(filtered_completions), self)
             else:
-                self.completion_list.hide()
+                self.completer.popup().hide()
+                logging.debug("No completions found, hiding completer popup.")
         except Exception as e:
-            print(f"Autouzupełnianie błędów: {e}")
-            self.completion_list.hide()
+            logging.exception(f"Autouzupełnianie błędu: {e}")
+            self.completer.popup().hide()
 
-    def complete_text(self, item):
-        cursor = self.textCursor()
-        cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+#    def complete_text(self, completion):
+#        cursor = self.textCursor()
+#       cursor.select(QTextCursor.SelectionType.WordUnderCursor)
         cursor.removeSelectedText()
-        cursor.insertText(item.text())
+        cursor.insertText(completion)
         self.setTextCursor(cursor)
-        self.completion_list.hide()
-            
+        
 class CodeNavigatorPanel(QWidget):
     def __init__(self, main_window):
         super().__init__()
@@ -717,103 +690,27 @@ class SettingsDialog(QDialog):
         save_button = QPushButton("Zapisz")
         save_button.clicked.connect(self.accept)
         layout.addWidget(save_button)
-# Opcja włączania/wyłączania autouzupełniania na żądanie
-        self.autocomplete_on_demand_checkbox = QCheckBox("Autouzupełnianie na żądanie")
-        self.autocomplete_on_demand_checkbox.setChecked(False)  # Domyślnie wyłączone
-        layout.addWidget(self.autocomplete_on_demand_checkbox)
 
         self.setLayout(layout)
-
-def get_settings(self):
-    return {
-        'clean_paste': self.clean_paste_checkbox.isChecked(),
-        'smart_indent': self.smart_indent_checkbox.isChecked(),
-        'confirm_delete': self.confirm_delete_checkbox.isChecked(),
-        'theme': self.theme_combo.currentText(),
-        'font_size': self.font_size_spin.value(),
-        'auto_save': self.auto_save_checkbox.isChecked(),
-        'focus_mode': self.focus_mode_checkbox.isChecked(),
-        'autocomplete_on_demand': self.autocomplete_on_demand_checkbox.isChecked(),  
-    }
+                        
+    def get_settings(self):
+        return {
+            'clean_paste': self.clean_paste_checkbox.isChecked(),
+            'smart_indent': self.smart_indent_checkbox.isChecked(),
+            'confirm_delete': self.confirm_delete_checkbox.isChecked(),
+            'theme': self.theme_combo.currentText(),
+            'font_size': self.font_size_spin.value(),
+            'auto_save': self.auto_save_checkbox.isChecked(),
+            'focus_mode': self.focus_mode_checkbox.isChecked(),
+        }
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Prosty Edytor Python - MiniIDE")
-        self.resize(1200, 800)
-
-        # Inicjalizacja ścieżki repozytorium Git
-        self.git_repo_path = '.'  # Domyślnie bieżący katalog
-
-        # Przechowywanie ścieżek plików dla zakładek
-        self.tab_paths = {}
-
-        # Pasek statusu
-        self.status_bar = self.statusBar()
-
-        # Główny widget z zakładkami
-        self.tab_widget = QTabWidget()
-        self.tab_widget.setTabsClosable(True)
-        self.tab_widget.tabCloseRequested.connect(self.close_tab)
-        self.tab_widget.currentChanged.connect(self.on_tab_changed)
-
-        # Panel wyjściowy
-        self.output = QPlainTextEdit()
-        self.output.setReadOnly(True)
-        self.output.setMaximumHeight(200)
-        self.output.setFont(QFont("Consolas", 10))
-        self.output.setStyleSheet("background-color: #f0f0f0;")
-
-        # Panel nawigacji kodu
-        self.navigator_panel = CodeNavigatorPanel(self)
-
-        # Dodanie pierwszej zakładki
-        self.current_editor = None  # Bieżący edytor
-        self.add_new_tab()
-
-        # Splitter do podziału edytora i paneli bocznych
-        main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        main_splitter.addWidget(self.navigator_panel)
-        main_splitter.addWidget(self.tab_widget)
-        main_splitter.setStretchFactor(1, 3)
-
-        # Główny splitter do podziału edytora i wyjścia
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.addWidget(main_splitter)
-        splitter.addWidget(self.output)
-        splitter.setStretchFactor(0, 4)
-        splitter.setStretchFactor(1, 1)
-
-        self.setCentralWidget(splitter)
-
-        self.create_menu()
-
-        # Ustawienie domyślnego interpretera
-        self.python_interpreter = sys.executable
-        self.flake8_config = None
-
-        # Inicjalizacja debuggera
-        self.debugger = None
-
-        # Timer Auto-Save
-        self.auto_save_timer = QTimer()
-        self.auto_save_timer.setInterval(300000)  # 5 minut
-        self.auto_save_timer.timeout.connect(self.auto_save)
-        self.auto_save_timer.start()
-
-        # Aktualizacja paska statusu
-        self.update_status_bar()
-
-        # Ustawienia domyślne
-        self.settings = {
-            'clean_paste': True,
-            'smart_indent': True,
-            'confirm_delete': True,
-            'theme': 'Jasny',
-            'font_size': 12,
-            'auto_save': True,
-            'focus_mode': False,
-        }
+        self.editor = CodeEditor()
+        self.setCentralWidget(self.editor)
+        self.setWindowTitle("Mordeczko Editor Test")
+        self.resize(800, 600)
 
     def create_menu(self):
         menubar = self.menuBar()
@@ -1429,10 +1326,13 @@ class MainWindow(QMainWindow):
                     print(f"Auto-save failed for {file_path}: {e}")
 
 def main():
-    app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec())
+    try:
+        app = QApplication(sys.argv)
+        window = MainWindow()
+        window.show()
+        sys.exit(app.exec())
+    except Exception as e:
+        logging.exception("Exception occurred in main:")
 
 if __name__ == "__main__":
     main()
