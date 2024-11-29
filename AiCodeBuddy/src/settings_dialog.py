@@ -67,6 +67,11 @@ class SettingsDialog(QDialog):
 
         self.setLayout(layout)
 
+        # Opcja wyborujak ma się zachowywać autouzupełnianie
+        self.autocomplete_checkbox = QCheckBox("Automatyczne autouzupełnianie")
+        self.autocomplete_checkbox.setChecked(True)
+        layout.addWidget(self.autocomplete_checkbox)
+
     def get_settings(self):
         """
         Zwraca aktualne ustawienia z dialogu.
@@ -81,5 +86,6 @@ class SettingsDialog(QDialog):
             'focus_mode': self.focus_mode_checkbox.isChecked(),
             'autocomplete_on_demand': self.autocomplete_on_demand_checkbox.isChecked(),
             'font_family': self.font_combo.currentText(),
+            'autocomplete': self.autocomplete_checkbox.isChecked(),
 
         }

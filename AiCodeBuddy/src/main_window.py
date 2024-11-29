@@ -16,6 +16,7 @@ import io
 import contextlib
 import unittest
 import git
+import mimetypes
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -25,6 +26,8 @@ class MainWindow(QMainWindow):
 
         # Inicjalizacja ścieżki repozytorium Git
         self.git_repo_path = '.'
+        self.settings = {}
+        self.load_settings()
 
         # Przechowywanie ścieżek plików dla zakładek
         self.tab_paths = {}
@@ -234,6 +237,19 @@ class MainWindow(QMainWindow):
         log_action.triggered.connect(self.git_show_log)
         git_menu.addAction(log_action)
 
+        delete_branch_action = QAction("Usuń Branch", self)
+        delete_branch_action.triggered.connect(self.git_delete_branch)
+        git_menu.addAction(delete_branch_action)
+
+        checkout_branch_action = QAction("Przełącz Branch", self)
+        checkout_branch_action.triggered.connect(self.git_checkout_branch)
+        git_menu.addAction(checkout_branch_action)
+
+        reset_commit_action = QAction("Resetuj do Commita", self)
+        reset_commit_action.triggered.connect(self.git_reset_commit)
+        git_menu.addAction(reset_commit_action)
+
+
     def open_settings_dialog(self):
         dialog = SettingsDialog(self)
         dialog.clean_paste_checkbox.setChecked(self.settings['clean_paste'])
@@ -246,19 +262,9 @@ class MainWindow(QMainWindow):
 
         if dialog.exec():
             self.settings = dialog.get_settings()
-            # Przekaż ustawienia do wszystkich otwartych edytorów
-            for i in range(self.tab_widget.count()):
-                editor = self.tab_widget.widget(i)
-                editor.apply_settings(self.settings)
-            # Zastosuj ustawienia motywu do całego okna
-            self.apply_theme(self.settings['theme'])
-            # Zastosuj tryb skupienia
+            # Zastosuj wszystkie ustawienia w jednym miejscu
             self.apply_settings(self.settings)
-            # Aktualizacja ustawień auto-save
-            if self.settings.get('auto_save', True):
-                self.auto_save_timer.start()
-            else:
-                self.auto_save_timer.stop()
+
     def load_settings(self):
         settings = QSettings('AiCodeBuddy', 'Settings')
         self.settings['clean_paste'] = settings.value('clean_paste', True, type=bool)
@@ -268,6 +274,9 @@ class MainWindow(QMainWindow):
         self.settings['font_size'] = settings.value('font_size', 12, type=int)
         self.settings['auto_save'] = settings.value('auto_save', True, type=bool)
         self.settings['focus_mode'] = settings.value('focus_mode', False, type=bool)
+        self.settings['git_repo_path'] = settings.value('git_repo_path', '', type=str)
+        if self.settings['git_repo_path']:
+            self.git_repo_path = self.settings['git_repo_path']
 
     def save_settings(self):
         settings = QSettings('AiCodeBuddy', 'Settings')
@@ -278,7 +287,8 @@ class MainWindow(QMainWindow):
         settings.setValue('font_size', self.settings['font_size'])
         settings.setValue('auto_save', self.settings['auto_save'])
         settings.setValue('focus_mode', self.settings['focus_mode'])
-
+        settings.setValue('git_repo_path', self.settings.get('git_repo_path', ''))
+    
     def closeEvent(self, event):
         self.save_settings()
         super().closeEvent(event)
@@ -319,21 +329,26 @@ class MainWindow(QMainWindow):
     def apply_settings(self, settings):
         self.settings = settings
         # Zastosuj motyw
-        self.apply_theme(self.settings['theme'])
+        self.apply_theme(settings['theme'])
+        # Przekaż ustawienia do wszystkich otwartych edytorów
+        for i in range(self.tab_widget.count()):
+            editor = self.tab_widget.widget(i)
+            editor.apply_settings(settings)
         # Zastosuj tryb skupienia
-        if self.settings.get('focus_mode', False):
+        if settings.get('focus_mode', False):
             self.navigator_panel.hide()
             self.output.hide()
         else:
             self.navigator_panel.show()
             self.output.show()
         # Aktualizacja ustawień auto-save
-        if self.settings.get('auto_save', True):
+        if settings.get('auto_save', True):
             self.auto_save_timer.start()
         else:
             self.auto_save_timer.stop()
         # Zaktualizuj pasek statusu
         self.update_status_bar()
+
 
     def update_status_bar(self):
         editor = self.get_current_editor()
@@ -360,21 +375,22 @@ class MainWindow(QMainWindow):
         current_index = self.tab_widget.currentIndex()
         self.tab_paths[current_index] = None
 
-        # Połączenie sygnałów do aktualizacji paska statusu
+        # Połączenie sygnałów do aktualizacji paska statusu i tytułu zakładki
         editor.textChanged.connect(self.update_status_bar)
         editor.undoAvailable.connect(self.update_status_bar)
         editor.redoAvailable.connect(self.update_status_bar)
-        editor.modificationChanged.connect(self.update_tab_title)
+        editor.document().modificationChanged.connect(lambda:
+        self.update_tab_title(editor))
 
-    def update_tab_title(self):
-        current_index = self.tab_widget.currentIndex()
-        editor = self.get_current_editor()
-        if editor:
-            filename = self.tab_widget.tabText(current_index).rstrip(' *')
+    def update_tab_title(self, editor):
+        index = self.tab_widget.indexOf(editor)
+        if index != -1:
+            filename = self.tab_widget.tabText(index).rstrip(' *')
             if editor.document().isModified():
-                self.tab_widget.setTabText(current_index, filename + ' *')
+                self.tab_widget.setTabText(index, filename + ' *')
             else:
-                self.tab_widget.setTabText(current_index, filename)
+                self.tab_widget.setTabText(index, filename)
+
     def on_tab_changed(self, index):
         # Odłącz sygnał z poprzedniego edytora
         if hasattr(self, 'current_editor') and self.current_editor:
@@ -427,19 +443,38 @@ class MainWindow(QMainWindow):
         self.add_new_tab()
 
     def open_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Otwórz plik", "",
-            "Python Files (*.py);;JavaScript Files (*.js);;C++ Files (*.cpp *.hpp);;Go Files (*.go);;All Files (*)")
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Otwórz plik",
+            "",
+            "Pliki obsługiwane (*.py *.js *.cpp *.hpp *.go);;Wszystkie pliki (*)"
+        )
         if path:
+            mime_type, _ = mimetypes.guess_type(path)
+            if mime_type is not None and not mime_type.startswith('text'):
+                QMessageBox.warning(self, "Błąd", "Wybrany plik nie jest plikiem tekstowym.")
+                return
             try:
                 with open(path, 'r', encoding='utf-8') as f:
                     code = f.read()
-                filename = os.path.basename(path)  # Pobranie nazwy pliku
-                self.add_new_tab(code, filename)
-                # Przechowywanie ścieżki pliku
-                current_index = self.tab_widget.currentIndex()
-                self.tab_paths[current_index] = path
+                # ... reszta kodu ...
+            except UnicodeDecodeError:
+                QMessageBox.critical(self, "Błąd", "Nie można odczytać pliku. Upewnij się, że plik jest w formacie tekstowym UTF-8.")
             except Exception as e:
                 QMessageBox.critical(self, "Błąd", f"Nie można otworzyć pliku:\n{e}")
+    
+    def get_language_from_extension(self, ext):
+        ext = ext.lower()
+        if ext == '.py':
+            return 'python'
+        elif ext in ('.js', '.jsx'):
+            return 'javascript'
+        elif ext in ('.cpp', '.hpp', '.cc', '.cxx', '.h'):
+            return 'cpp'
+        elif ext == '.go':
+            return 'go'
+        else:
+            return 'plaintext'  # Domyślny język dla nieobsługiwanych plików
 
     def save_file(self):
         editor = self.get_current_editor()
@@ -756,12 +791,56 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Git Błąd", f"Wystąpił błąd podczas pobierania logów: {e}")
 
+    def git_delete_branch(self):
+        try:
+            repo = git.Repo(self.git_repo_path)
+            branches = [head.name for head in repo.branches if head.name != repo.active_branch.name]
+            if not branches:
+                QMessageBox.information(self, "Git", "Brak innych branchy do usunięcia.")
+                return
+            branch, ok = QInputDialog.getItem(self, "Usuń Branch", "Wybierz branch do usunięcia:", branches, 0, False)
+            if ok and branch:
+                repo.delete_head(branch, force=True)
+                QMessageBox.information(self, "Git", f"Branch {branch} został usunięty.")
+            else:
+                QMessageBox.warning(self, "Git", "Nie wybrano brancha do usunięcia.")
+        except Exception as e:
+            QMessageBox.critical(self, "Git Błąd", f"Wystąpił błąd podczas usuwania brancha: {e}")
+
+    def git_checkout_branch(self):
+        try:
+            repo = git.Repo(self.git_repo_path)
+            branches = [head.name for head in repo.heads]
+            branch, ok = QInputDialog.getItem(self, "Przełącz Branch", "Wybierz branch do przełączenia:", branches, 0, False)
+            if ok and branch:
+                repo.git.checkout(branch)
+                QMessageBox.information(self, "Git", f"Przełączono na branch: {branch}")
+        except Exception as e:
+            QMessageBox.critical(self, "Git Błąd", f"Wystąpił błąd podczas przełączania brancha: {e}")
+
+    def git_reset_commit(self):
+        try:
+            repo = git.Repo(self.git_repo_path)
+            commits = list(repo.iter_commits())
+            commit_messages = [f"{commit.hexsha[:7]} - {commit.message.strip()}" for commit in commits]
+            commit, ok = QInputDialog.getItem(self, "Reset do Commita", "Wybierz commit do resetu:", commit_messages, 0, False)
+            if ok and commit:
+                sha = commit.split(' - ')[0]
+                repo.git.reset('--hard', sha)
+                QMessageBox.information(self, "Git", f"Zresetowano do commita: {sha}")
+        except Exception as e:
+            QMessageBox.critical(self, "Git Błąd", f"Wystąpił błąd podczas resetowania: {e}")
+
+
     def select_git_repo(self):
         path = QFileDialog.getExistingDirectory(self, "Wybierz Repozytorium Git", "")
         if path:
             try:
                 repo = git.Repo(path)
                 self.git_repo_path = path
+                # Zapisz ścieżkę do ustawień
+                self.settings['git_repo_path'] = path
+                self.save_settings()
                 QMessageBox.information(self, "Git Repo", f"Wybrane repozytorium: {path}")
             except git.exc.InvalidGitRepositoryError:
                 QMessageBox.critical(self, "Git Błąd", "Wybrany folder nie jest repozytorium Git.")

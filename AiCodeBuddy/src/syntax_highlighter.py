@@ -5,6 +5,7 @@ from pygments import lex
 from pygments.lexers import get_lexer_by_name
 from pygments.styles import get_style_by_name
 import re
+import json
 
 class GenericHighlighter(QSyntaxHighlighter):
     def __init__(self, document, language='python', theme='friendly'):
@@ -41,10 +42,10 @@ class GenericHighlighter(QSyntaxHighlighter):
             self.formats[token] = qt_format
 
     def set_language(self, language):
-        """
-        Ustawia lexer dla wybranego języka.
-        """
-        self.lexer = get_lexer_by_name(language)
+        try:
+            self.lexer = get_lexer_by_name(language)
+        except Exception:
+            self.lexer = get_lexer_by_name('text')
         self.rehighlight()
 
     def highlightBlock(self, text):

@@ -105,12 +105,18 @@ class CodeEditor(QPlainTextEdit):
         self.completion_timer.setInterval(300)
         self.completion_timer.timeout.connect(self.show_completions)
 
+# Cały czas występuja opproblemy z listą podpowiedzi, problem prawdopodobnie zniknie po przejściu na Qscilla
     def eventFilter(self, obj, event):
         if event.type() == event.Type.MouseButtonPress:
             if self.completion_list.isVisible():
-                if not self.completion_list.geometry().contains(event.globalPosition().toPoint()):
+                if not self.completion_list.geometry().contains(self.mapToGlobal(event.position().toPoint())):
                     self.completion_list.hide()
         return super().eventFilter(obj, event)
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+        if self.completion_list.isVisible():
+            self.completion_list.hide()
 
     def toggle_bookmark(self, block_number):
         if not hasattr(self, 'bookmarks'):
@@ -185,7 +191,7 @@ class CodeEditor(QPlainTextEdit):
             self.insertPlainText(cleaned_text)
         else:
             super().pasteEvent(event)
-
+    # Cały czas występuja opproblemy z listą podpowiedzi, problem prawdopodobnie zniknie po przejściu na Qscilla
     def keyPressEvent(self, event):
         """
         Obsługa zdarzeń klawiatury, w tym inteligentnego wcięcia i autouzupełniania.
@@ -203,11 +209,16 @@ class CodeEditor(QPlainTextEdit):
                 if current_line.rstrip().endswith(':'):
                     indentation += '    '
 
+                # Wstaw nową linię
                 super().keyPressEvent(event)
 
                 # Dodaj wcięcie do nowej linii
                 cursor = self.textCursor()
                 cursor.insertText(indentation)
+                return
+            else:
+                # Jeśli inteligentne wcięcie jest wyłączone, przetwórz Enter normalnie
+                super().keyPressEvent(event)
                 return
         elif event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             if self.settings.get('confirm_delete', True):
@@ -241,12 +252,14 @@ class CodeEditor(QPlainTextEdit):
                 self.completion_list.hide()
                 return
 
+        # Przetwórz pozostałe klawisze normalnie
         super().keyPressEvent(event)
 
-        # Inicjalizacja autouzupełniania
-        if event.text().isidentifier() or event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
-            if not self.settings.get('autocomplete_on_demand', False):
+        # Inicjalizacja autouzupełniania tylko dla znaków identyfikatorów
+        if event.text().isidentifier():
+            if self.settings.get('autocomplete', True) and not self.settings.get('autocomplete_on_demand', False):
                 self.completion_timer.start()
+
 
     def accept_completion(self):
         """
