@@ -1,0 +1,29 @@
+1. Testy dla LineNumberArea:
+1.1. Testowanie sizeHint()
+
+    Sprawdzenie, czy metoda sizeHint() zwraca odpowiednią wartość (czyli szerokość, którą powinien mieć obszar numerów linii).
+
+1.2. Testowanie paintEvent()
+
+    Zależy nam na tym, by paintEvent() wywołało odpowiednią metodę w code_editor. Możemy to zrobić, mockując code_editor i sprawdzając, czy wywołano odpowiednią metodę renderującą.
+
+1.3. Testowanie mousePressEvent()
+
+    Należy upewnić się, że kliknięcie na odpowiednią linię powoduje wyemitowanie sygnału clicked. To pozwala na sprawdzenie, czy kliknięcie w obszar numerów linii poprawnie wywołuje sygnał z numerem linii.
+
+2. Testy dla GenericHighlighter:
+2.1. Testowanie inicjalizacji z language
+
+    Sprawdzenie, czy po inicjalizacji z określonym językiem (np. 'python') prawidłowo ustawiany jest lexer i czy wywoływana jest metoda rehighlight(). Możesz sprawdzić, czy lexer nie jest None i czy jest typu odpowiedniego dla języka.
+
+2.2. Testowanie highlightBlock()
+
+    Testowanie samego mechanizmu kolorowania. Można podać przykładowy tekst, który zawiera różne tokeny (np. słowa kluczowe, zmienne) i sprawdzić, czy metoda setFormat() zostaje wywołana odpowiednią ilość razy, z odpowiednimi wartościami.
+
+2.3. Testowanie obsługi błędów w highlightBlock()
+
+    Testowanie, czy formatowanie błędów (np. podkreślenie na czerwono) działa poprawnie, kiedy linia zawiera błąd. Możesz przygotować tekst z błędami i sprawdzić, czy metoda setFormat() zostanie wywołana z odpowiednim formatowaniem.
+    
+    
+    
+    
