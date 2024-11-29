@@ -443,23 +443,25 @@ class MainWindow(QMainWindow):
         self.add_new_tab()
 
     def open_file(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Otwórz plik",
-            "",
-            "Pliki obsługiwane (*.py *.js *.cpp *.hpp *.go);;Wszystkie pliki (*)"
-        )
+        path, _ = QFileDialog.getOpenFileName(self, "Otwórz plik", "",
+            "Python Files (*.py);;JavaScript Files (*.js);;C++ Files (*.cpp *.hpp);;Go Files (*.go);;All Files (*)")
         if path:
-            mime_type, _ = mimetypes.guess_type(path)
-            if mime_type is not None and not mime_type.startswith('text'):
-                QMessageBox.warning(self, "Błąd", "Wybrany plik nie jest plikiem tekstowym.")
-                return
             try:
                 with open(path, 'r', encoding='utf-8') as f:
                     code = f.read()
-                # ... reszta kodu ...
-            except UnicodeDecodeError:
-                QMessageBox.critical(self, "Błąd", "Nie można odczytać pliku. Upewnij się, że plik jest w formacie tekstowym UTF-8.")
+                filename = os.path.basename(path)  # Pobranie nazwy pliku
+                # Ustal język na podstawie rozszerzenia
+                _, ext = os.path.splitext(path)
+                language = self.get_language_from_extension(ext)
+                # Dodaj nową zakładkę z edytorem
+                editor = CodeEditor()
+                editor.setPlainText(code)
+                editor.highlighter.set_language(language)
+                self.tab_widget.addTab(editor, filename)
+                self.tab_widget.setCurrentWidget(editor)
+                # Przechowywanie ścieżki pliku
+                current_index = self.tab_widget.currentIndex()
+                self.tab_paths[current_index] = path
             except Exception as e:
                 QMessageBox.critical(self, "Błąd", f"Nie można otworzyć pliku:\n{e}")
     

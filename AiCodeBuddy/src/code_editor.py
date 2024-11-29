@@ -1,23 +1,31 @@
 # src/code_editor.py
 
+import os
+import uuid
+import shutil
+import subprocess
+import atexit
+import re
+import ast
+
 from PyQt6.QtWidgets import (
     QPlainTextEdit, QListWidget, QListWidgetItem, QTextEdit,
     QDialog, QHBoxLayout, QLineEdit, QLabel, QMessageBox, QApplication
 )
 from PyQt6.QtGui import (
-    QFont, QColor, QTextFormat, QPainter, QTextCursor, QKeySequence, QIcon, QRegularExpressionValidator, QTextCharFormat
+    QFont, QColor, QTextFormat, QPainter, QTextCursor, QIcon, QTextCharFormat
 )
 from PyQt6.QtCore import (
     Qt, QTimer, QThread, pyqtSignal, QRegularExpression, QRect
 )
+
 import jedi
-import re
-import ast
 
 # Importuj potrzebne klasy
 from line_number_area import LineNumberArea
 from syntax_highlighter import GenericHighlighter
 from linter_worker import LinterWorker
+
 
 class CodeEditor(QPlainTextEdit):
     """
@@ -28,6 +36,7 @@ class CodeEditor(QPlainTextEdit):
     - Breakpointy
     - Linter
     - Autouzupełnianie
+    - Uruchamianie skryptu (F5)
     """
     symbols_updated = pyqtSignal(dict)  # Sygnał zaktualizowanych symboli
 
@@ -41,6 +50,13 @@ class CodeEditor(QPlainTextEdit):
         self.file_path = None
         self.is_linting = False
         self.previous_errors = []
+
+        # Ścieżka do folderu tymczasowego
+        self.temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
+        os.makedirs(self.temp_dir, exist_ok=True)  # Tworzy folder temp, jeśli nie istnieje
+
+        # Rejestracja funkcji czyszczącej dla plików tymczasowych
+        atexit.register(self.cleanup_temp_files)
 
         # Tworzenie obszaru numerów linii
         self.line_number_area = LineNumberArea(self)
@@ -84,7 +100,8 @@ class CodeEditor(QPlainTextEdit):
 
         # Dodajemy event filter
         self.installEventFilter(self)
-        # Ikony
+
+        # Ikony dla autouzupełniania
         self.function_icon = QIcon('assets/icons/function.png')
         self.class_icon = QIcon('assets/icons/class.png')
 
@@ -95,7 +112,7 @@ class CodeEditor(QPlainTextEdit):
         # Podłączenie sygnału zmiany zaznaczenia
         self.selectionChanged.connect(self.highlight_word_occurrences)
 
-        # Aktualizacja obszaru numerów linii
+        # Aktualizacja obszaru numerów linii i podświetlenie bieżącej linii
         self.update_line_number_area_width(0)
         self.highlight_current_line()
 
@@ -105,8 +122,23 @@ class CodeEditor(QPlainTextEdit):
         self.completion_timer.setInterval(300)
         self.completion_timer.timeout.connect(self.show_completions)
 
-# Cały czas występuja opproblemy z listą podpowiedzi, problem prawdopodobnie zniknie po przejściu na Qscilla
+    def cleanup_temp_files(self):
+        """
+        Usuwa folder temp wraz z wszystkimi plikami tymczasowymi.
+        """
+        if os.path.exists(self.temp_dir):
+            try:
+                shutil.rmtree(self.temp_dir)
+                print(f"Usunięto folder tymczasowy: {self.temp_dir}")
+            except Exception as e:
+                print(f"Nie udało się usunąć folderu {self.temp_dir}: {e}")
+
+    # ---------------------- Event Handlers ----------------------
+
     def eventFilter(self, obj, event):
+        """
+        Filtruje zdarzenia myszy, aby ukryć listę podpowiedzi autouzupełniania, jeśli kliknięto poza nią.
+        """
         if event.type() == event.Type.MouseButtonPress:
             if self.completion_list.isVisible():
                 if not self.completion_list.geometry().contains(self.mapToGlobal(event.position().toPoint())):
@@ -114,11 +146,19 @@ class CodeEditor(QPlainTextEdit):
         return super().eventFilter(obj, event)
 
     def focusOutEvent(self, event):
+        """
+        Ukrywa listę podpowiedzi autouzupełniania, gdy edytor traci fokus.
+        """
         super().focusOutEvent(event)
         if self.completion_list.isVisible():
             self.completion_list.hide()
 
+    # ---------------------- Bookmark and Breakpoint Handlers ----------------------
+
     def toggle_bookmark(self, block_number):
+        """
+        Przełącza zakładkę (bookmark) w danej linii.
+        """
         if not hasattr(self, 'bookmarks'):
             self.bookmarks = set()
         if block_number in self.bookmarks:
@@ -127,6 +167,8 @@ class CodeEditor(QPlainTextEdit):
             self.bookmarks.add(block_number)
         self.highlight_current_line()
         self.line_number_area.update()
+
+    # ---------------------- Settings and Theme Handlers ----------------------
 
     def apply_settings(self, settings):
         """
@@ -139,7 +181,12 @@ class CodeEditor(QPlainTextEdit):
         self.setFont(font)
 
         # Aktualizacja motywu
-        theme = self.settings.get('theme', 'Jasny')
+        self.apply_theme(self.settings.get('theme', 'Jasny'))
+
+    def apply_theme(self, theme):
+        """
+        Zastosuj wybrany motyw do edytora.
+        """
         if theme == 'Ciemny':
             self.setStyleSheet("background-color: #2b2b2b; color: #f8f8f2;")
             self.highlighter.theme = 'monokai'  # Możesz zmienić na inny ciemny motyw
@@ -160,25 +207,7 @@ class CodeEditor(QPlainTextEdit):
         self.highlighter.rehighlight()
         self.update()
 
-    def apply_theme(self, theme):
-        if theme == 'Ciemny':
-            self.setStyleSheet("background-color: #2b2b2b; color: #f8f8f2;")
-            self.highlighter.theme = 'monokai'  # Ustaw odpowiedni motyw
-        elif theme == 'Monokai':
-            self.setStyleSheet("background-color: #272822; color: #f8f8f2;")
-            self.highlighter.theme = 'monokai'
-        elif theme == 'Solarized Light':
-            self.setStyleSheet("background-color: #fdf6e3; color: #657b83;")
-            self.highlighter.theme = 'solarized-light'
-        elif theme == 'Solarized Dark':
-            self.setStyleSheet("background-color: #002b36; color: #839496;")
-            self.highlighter.theme = 'solarized-dark'
-        else:
-            self.setStyleSheet("")  # Domyślny jasny motyw
-            self.highlighter.theme = 'friendly'
-
-        self.highlighter.load_pygments_styles()
-        self.highlighter.rehighlight()
+    # ---------------------- Paste Event Handler ----------------------
 
     def pasteEvent(self, event):
         """
@@ -191,7 +220,9 @@ class CodeEditor(QPlainTextEdit):
             self.insertPlainText(cleaned_text)
         else:
             super().pasteEvent(event)
-    # Cały czas występuja opproblemy z listą podpowiedzi, problem prawdopodobnie zniknie po przejściu na Qscilla
+
+    # ---------------------- Key Press Event Handler ----------------------
+
     def keyPressEvent(self, event):
         """
         Obsługa zdarzeń klawiatury, w tym inteligentnego wcięcia i autouzupełniania.
@@ -260,7 +291,6 @@ class CodeEditor(QPlainTextEdit):
             if self.settings.get('autocomplete', True) and not self.settings.get('autocomplete_on_demand', False):
                 self.completion_timer.start()
 
-
     def accept_completion(self):
         """
         Akceptuje wybraną propozycję autouzupełniania.
@@ -268,8 +298,13 @@ class CodeEditor(QPlainTextEdit):
         selected_item = self.completion_list.currentItem()
         if selected_item:
             self.complete_text(selected_item)
-            
+
+    # ---------------------- Line Number Area Handlers ----------------------
+
     def handle_line_number_clicked(self, block_number, modifiers):
+        """
+        Obsługuje kliknięcia na obszarze numerów linii.
+        """
         if modifiers == Qt.KeyboardModifier.NoModifier:
             # Przenosimy kursor do wybranej linii bez zaznaczania
             cursor = self.textCursor()
@@ -287,7 +322,7 @@ class CodeEditor(QPlainTextEdit):
 
     def toggle_breakpoint(self, block_number):
         """
-        Przełączanie breakpointu w danej linii.
+        Przełącza breakpoint w danej linii.
         """
         if block_number in self.breakpoints:
             self.breakpoints.remove(block_number)
@@ -305,6 +340,9 @@ class CodeEditor(QPlainTextEdit):
         return space
 
     def line_number_area_paint_event(self, event):
+        """
+        Rysuje numery linii oraz breakpointy i zakładki w obszarze numerów linii.
+        """
         painter = QPainter(self.line_number_area)
         # Ustawienie tła
         if self.settings.get('theme', 'Jasny') == 'Ciemny':
@@ -353,7 +391,6 @@ class CodeEditor(QPlainTextEdit):
         """
         self.setViewportMargins(self.line_number_area_width(), 0, 0, 0)
 
-
     def update_line_number_area(self, rect, dy):
         """
         Aktualizuje obszar numerów linii podczas przewijania.
@@ -374,6 +411,7 @@ class CodeEditor(QPlainTextEdit):
         cr = self.contentsRect()
         self.line_number_area.setGeometry(QRect(cr.left(), cr.top(), self.line_number_area_width(), cr.height()))
 
+    # ---------------------- Highlighting Handlers ----------------------
 
     def highlight_current_line(self):
         """
@@ -451,11 +489,15 @@ class CodeEditor(QPlainTextEdit):
             self.word_highlight_selections = []
             self.setExtraSelections(self.extra_selections)
 
+    # ---------------------- Text Change Handler ----------------------
+
     def on_text_changed(self):
         """
         Reakcja na zmianę tekstu - uruchamia timer aktualizacji symboli.
         """
         self.symbols_update_timer.start()
+
+    # ---------------------- Linter Handlers ----------------------
 
     def run_linter(self):
         """
@@ -529,6 +571,8 @@ class CodeEditor(QPlainTextEdit):
             parent_window.output.clear()
             parent_window.output.appendPlainText(f">>> Błąd lintera: {error_message}")
 
+    # ---------------------- Symbol Panel Handlers ----------------------
+
     def update_symbols_panel(self):
         """
         Aktualizacja panelu symboli (funkcje, klasy).
@@ -553,6 +597,8 @@ class CodeEditor(QPlainTextEdit):
         except SyntaxError:
             pass
         return {'functions': functions, 'classes': classes}
+
+    # ---------------------- Find Dialog Handlers ----------------------
 
     def show_find_dialog(self):
         """
@@ -588,14 +634,28 @@ class CodeEditor(QPlainTextEdit):
         if not found:
             QMessageBox.information(self, "Znajdź", f"Nie znaleziono: {search_text}")
 
+    # ---------------------- Autocompletion Handlers ----------------------
+
     def show_completions(self):
+        """
+        Wyświetla listę podpowiedzi autouzupełniania na podstawie bieżącej pozycji kursora.
+        """
         try:
             cursor = self.textCursor()
             # Zdobądź pozycję kursora
-            line = cursor.blockNumber() + 1  # Lines are 1-based in jedi
-            column = cursor.positionInBlock()  # Columns are 0-based in jedi
+            line = cursor.blockNumber() + 1  # Linijki są 1-based w jedi
+            column = cursor.positionInBlock()  # Kolumny są 0-based w jedi
 
-            script = jedi.Script(code=self.toPlainText(), path='temp.py')
+            # Tworzenie unikalnej nazwy pliku tymczasowego
+            temp_filename = f"temp_script_{uuid.uuid4().hex}.py"
+            temp_filepath = os.path.join(self.temp_dir, temp_filename)
+
+            # Zapisz bieżący kod do pliku tymczasowego
+            with open(temp_filepath, 'w', encoding='utf-8') as f:
+                f.write(self.toPlainText())
+
+            # Użyj ścieżki z atrybutu klasy
+            script = jedi.Script(code=self.toPlainText(), path=temp_filepath)
             completions = script.complete(line, column)
 
             if completions:
@@ -621,13 +681,12 @@ class CodeEditor(QPlainTextEdit):
                 self.completion_list.move(list_pos)
                 self.completion_list.resize(300, min(150, self.completion_list.sizeHintForRow(0) * len(completions) + 2))
                 self.completion_list.show()
-                # Usunięcie setFocus()
             else:
                 self.completion_list.hide()
         except Exception as e:
             print(f"Autouzupełnianie błędów: {e}")
             self.completion_list.hide()
-            
+
     def complete_text(self, item):
         """
         Wstawia wybraną propozycję autouzupełniania do edytora.
@@ -643,3 +702,63 @@ class CodeEditor(QPlainTextEdit):
         cursor.insertText(item.text())
         self.setTextCursor(cursor)
         self.completion_list.hide()
+
+    # ---------------------- Run Script Handler ----------------------
+
+    def run_script(self):
+        """
+        Uruchamia napisany przez użytkownika skrypt w osobnym procesie.
+        Tworzy unikalne pliki tymczasowe w folderze temp i usuwa je po zakończeniu.
+        """
+        try:
+            # Generowanie unikalnej nazwy pliku tymczasowego
+            temp_filename = f"temp_run_{uuid.uuid4().hex}.py"
+            temp_filepath = os.path.join(self.temp_dir, temp_filename)
+
+            # Zapisz bieżący kod do pliku tymczasowego
+            with open(temp_filepath, 'w', encoding='utf-8') as f:
+                f.write(self.toPlainText())
+            print(f"Zapisano skrypt do pliku tymczasowego: {temp_filepath}")
+
+            # Uruchom skrypt w osobnym procesie
+            process = subprocess.Popen(
+                ['python', temp_filepath],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+
+            # Odczytaj wyjście i błędy
+            stdout, stderr = process.communicate()
+
+            # Wyświetl wyniki w oknie output (zakładamy, że istnieje w parent_window)
+            parent_window = self.window()
+            if parent_window and hasattr(parent_window, 'output'):
+                parent_window.output.clear()
+                if stdout:
+                    parent_window.output.appendPlainText(">>> Wyjście:")
+                    parent_window.output.appendPlainText(stdout)
+                if stderr:
+                    parent_window.output.appendPlainText(">>> Błędy:")
+                    parent_window.output.appendPlainText(stderr)
+                if not stdout and not stderr:
+                    parent_window.output.appendPlainText(">>> Skrypt zakończył się bez wyjścia.")
+        except Exception as e:
+            print(f"Błąd podczas uruchamiania skryptu: {e}")
+            parent_window = self.window()
+            if parent_window and hasattr(parent_window, 'output'):
+                parent_window.output.clear()
+                parent_window.output.appendPlainText(f">>> Błąd uruchamiania skryptu: {e}")
+        finally:
+            # Usunięcie pliku tymczasowego po zakończeniu
+            if os.path.exists(temp_filepath):
+                try:
+                    os.remove(temp_filepath)
+                    print(f"Usunięto plik tymczasowy: {temp_filepath}")
+                except Exception as e:
+                    print(f"Nie udało się usunąć pliku {temp_filepath}: {e}")
+
+    # ---------------------- Autocompletion Handlers ----------------------
+
+    # Reszta metod pozostaje bez zmian
+

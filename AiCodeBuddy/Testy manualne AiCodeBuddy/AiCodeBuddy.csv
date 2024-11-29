@@ -1,0 +1,111 @@
+ID Testu,Funkcja,Kroki Testowe,Oczekiwany Rezultat,Status,Notatki
+1.1,Nowy plik,"1. Uruchom aplikację.
+2. W menu 'Plik' wybierz opcję 'Nowy'.","- Powinna otworzyć się nowa zakładka z pustym edytorem kodu.
+- Zakładka powinna mieć domyślną nazwę, np. 'Untitled'.",,
+1.2.1,Otwieranie pliku Python,"1. W menu 'Plik' wybierz 'Otwórz'.
+2. Wybierz plik z rozszerzeniem .py.","- Plik zostaje otwarty w nowej zakładce.
+- Kod jest wyświetlany poprawnie.
+- Podświetlanie składni działa zgodnie z językiem Python.",,
+1.2.2,Otwieranie pliku nieobsługiwanego,"1. W menu 'Plik' wybierz 'Otwórz'.
+2. Wybierz plik .docx.","- Aplikacja wyświetla komunikat o błędzie lub ostrzeżenie, że plik nie jest obsługiwany.
+- Plik nie jest otwierany w edytorze.",,
+1.3,Zapisywanie pliku,"1. Otwórz nowy plik lub dokonaj zmian w istniejącym.
+2. W menu 'Plik' wybierz 'Zapisz'.","- Jeśli plik nie był wcześniej zapisany, powinno pojawić się okno dialogowe 'Zapisz jako'.
+- Po wskazaniu ścieżki plik zostaje zapisany.
+- Gwiazdka * przy nazwie zakładki znika.
+- Jeśli plik był wcześniej zapisany, zmiany są zapisywane bez okna dialogowego.",,
+1.4,Zapisz jako,"1. W menu 'Plik' wybierz 'Zapisz jako...'.
+2. Wybierz nową ścieżkę i nazwę pliku.","- Plik zostaje zapisany pod nową nazwą.
+- Zakładka aktualizuje nazwę pliku.
+- Gwiazdka * przy nazwie zakładki znika.",,
+1.5,Auto-zapis,"1. Upewnij się, że w ustawieniach opcja auto-zapisu jest włączona.
+2. Dokonaj zmian w otwartym pliku.
+3. Poczekaj 5 minut (lub ustaw krótszy interwał na potrzeby testu).","- Po upływie czasu auto-zapis powinien się wykonać.
+- Zmiany powinny być zapisane w pliku na dysku.
+- Gwiazdka * może zniknąć lub pozostać w zależności od implementacji.",,
+2.1,Podświetlanie składni,"1. Otwórz plik w języku Python, JavaScript, C++, Go.
+2. Sprawdź, czy składnia jest podświetlana odpowiednio dla każdego języka.","- Podświetlanie składni działa poprawnie dla każdego języka.
+- Kolory i style są zgodne z wybranym motywem.",,
+2.2,Inteligentne wcięcia,"1. Upewnij się, że opcja 'Inteligentne wcięcie' jest włączona w ustawieniach.
+2. Wpisz kod, który wymaga wcięcia (np. po dwukropku w Pythonie).
+3. Naciśnij Enter.","- Nowa linia jest automatycznie wcięta zgodnie z poprzednią linią.
+- Dodatkowe wcięcie jest dodawane po liniach zakończonych dwukropkiem w Pythonie.",,
+2.3,Autouzupełnianie,"1. Upewnij się, że autouzupełnianie jest włączone w ustawieniach.
+2. Wpisz fragment kodu, np. zaczynając pisać nazwę funkcji lub zmiennej.
+3. Obserwuj, czy pojawia się lista podpowiedzi.
+4. Wybierz podpowiedź z listy.","- Lista podpowiedzi pojawia się po wpisaniu odpowiedniej liczby znaków.
+- Podpowiedzi są zgodne z kontekstem (np. dostępne metody, zmienne).
+- Wybrana podpowiedź zostaje wstawiona do kodu.",,
+2.4,Szukanie tekstu,"1. Otwórz plik z kodem.
+2. Naciśnij Ctrl+F lub wybierz opcję 'Znajdź'.
+3. Wpisz szukany tekst i naciśnij Enter.","- Dialog wyszukiwania pojawia się.
+- Wystąpienia szukanego tekstu są podświetlane w kodzie.
+- Kursor przeskakuje do kolejnego wystąpienia po naciśnięciu Enter.",,
+2.5,Podświetlanie bieżącej linii,"1. Kliknij w dowolne miejsce w edytorze.","- Bieżąca linia jest podświetlona innym kolorem tła.",,
+2.6,Numeracja linii,"1. Sprawdź, czy po lewej stronie edytora widoczne są numery linii.","- Numery linii są wyświetlane poprawnie.
+- Zmieniają się dynamicznie przy przewijaniu i dodawaniu/usuwaniu linii.",,
+3.1,Wybór repozytorium Git,"1. W menu 'Git' wybierz 'Wybierz Repozytorium Git'.
+2. Wskaż folder z repozytorium Git.","- Repozytorium zostaje załadowane.
+- Ścieżka jest zapamiętana i dostępna po ponownym uruchomieniu aplikacji.",,
+3.2,Commit zmian,"1. Dokonaj zmian w pliku znajdującym się w repozytorium.
+2. W menu 'Git' wybierz 'Commit'.
+3. Wpisz wiadomość commit i zatwierdź.","- Zmiany zostają zacommitowane.
+- Otrzymujesz potwierdzenie o powodzeniu operacji.",,
+3.3,Push zmian,"1. W menu 'Git' wybierz 'Push'.","- Zmiany zostają wypchnięte do zdalnego repozytorium.
+- Otrzymujesz potwierdzenie o powodzeniu operacji.",,
+3.4,Pull zmian,"1. W menu 'Git' wybierz 'Pull'.","- Najnowsze zmiany zostają pobrane z zdalnego repozytorium.
+- Konflikty (jeśli wystąpią) są odpowiednio obsługiwane lub zgłaszane.",,
+3.5.1,Tworzenie brancha Git,"1. W menu 'Git' wybierz 'Utwórz Branch'.
+2. Wpisz nazwę nowego brancha.","- Nowy branch zostaje utworzony i aktywowany.",,
+3.5.2,Przełączanie brancha Git,"1. W menu 'Git' wybierz 'Przełącz Branch'.
+2. Wybierz istniejący branch z listy.","- Aktywny branch zostaje zmieniony.",,
+3.5.3,Usuwanie brancha Git,"1. W menu 'Git' wybierz 'Usuń Branch'.
+2. Wybierz branch do usunięcia.","- Wybrany branch zostaje usunięty (o ile nie jest aktualnie aktywny).",,
+4.1,Uruchamianie skryptu,"1. Otwórz plik z kodem w obsługiwanym języku (np. Python).
+2. W menu 'Uruchom' wybierz 'Uruchom Skrypt' lub naciśnij F5.","- Kod zostaje uruchomiony.
+- Wynik działania skryptu pojawia się w panelu wyjściowym.
+- Błędy (jeśli wystąpią) są wyświetlane w panelu wyjściowym.",,
+4.2,Debugowanie skryptu,"1. Ustaw breakpointy w kodzie (jeśli jest taka funkcjonalność).
+2. W menu 'Uruchom' wybierz 'Debuguj Skrypt' lub naciśnij F6.
+3. Podłącz się do debuggera (np. za pomocą VSCode).","- Skrypt uruchamia się w trybie debugowania.
+- Debugger zatrzymuje się na ustawionych breakpointach.
+- Możliwość wykonywania krokowego, podglądu zmiennych itp.",,
+5.1,Uruchomienie lintera,"1. W menu 'Konfiguracja' wybierz 'Sprawdź poprawność kodu' lub naciśnij Ctrl+L.","- Linter analizuje kod.
+- Wyniki analizy (błędy, ostrzeżenia) są wyświetlane w panelu wyjściowym.
+- Błędy są podświetlane w edytorze (np. podkreślenie faliste).",,
+5.2,Ustawienie konfiguracji Flake8,"1. Przygotuj plik konfiguracyjny dla Flake8.
+2. W menu 'Konfiguracja' wybierz 'Ustaw Konfigurację Flake8'.
+3. Wskaż plik konfiguracyjny.","- Konfiguracja Flake8 zostaje załadowana.
+- Kolejne uruchomienia lintera uwzględniają nową konfigurację.",,
+6.1,Zmiana motywu,"1. W menu 'Konfiguracja' wybierz 'Ustawienia IDE'.
+2. Wybierz inny motyw (np. z 'Jasny' na 'Ciemny').
+3. Zapisz zmiany.","- Wygląd aplikacji zmienia się zgodnie z wybranym motywem.
+- Kolory w edytorze, panelu nawigacji i innych elementach są odpowiednio dostosowane.",,
+6.2,Zmiana rozmiaru czcionki,"1. W menu 'Konfiguracja' wybierz 'Ustawienia IDE'.
+2. Zmień rozmiar czcionki na inny (np. z 12 na 16).
+3. Zapisz zmiany.","- Rozmiar czcionki w edytorze kodu zmienia się zgodnie z ustawieniem.",,
+6.3,Włączanie/wyłączanie opcji,"1. W menu 'Konfiguracja' wybierz 'Ustawienia IDE'.
+2. Włącz lub wyłącz opcje takie jak 'Automatyczne czyszczenie wklejania', 'Inteligentne wcięcie', 'Potwierdzenie przed usunięciem', 'Tryb skupienia'.
+3. Zapisz zmiany.","- Działanie aplikacji dostosowuje się do wybranych ustawień.
+- Na przykład, w trybie skupienia panele boczne są ukrywane.",,
+7.1,Wyświetlanie funkcji i klas,"1. Otwórz plik z kodem zawierającym funkcje i klasy.
+2. Sprawdź panel nawigacji kodu.","- Panel nawigacji wyświetla listę funkcji i klas.
+- Kliknięcie na element przenosi kursor do odpowiedniego miejsca w kodzie.",,
+7.2,Aktualizacja panelu nawigacji,"1. Dodaj nową funkcję lub klasę w kodzie.
+2. Sprawdź, czy panel nawigacji został zaktualizowany.","- Nowo dodane elementy pojawiają się w panelu nawigacji.
+- Poprawnie działają linki do nich.",,
+8.1,Reakcja na błędne operacje,"1. Spróbuj wykonać operację bez wymaganych kroków, np. 'Commit' bez wybranego repozytorium Git.","- Aplikacja wyświetla odpowiedni komunikat o błędzie.
+- Użytkownik jest informowany o konieczności wykonania wcześniejszych kroków.",,
+8.2,Sprawdzanie stabilności,"1. Wykonuj różne operacje w szybkim tempie (np. otwieranie/zamykanie zakładek, zmiana ustawień).
+2. Obserwuj, czy aplikacja zachowuje stabilność.","- Aplikacja działa płynnie, bez zawieszania się czy awarii.",,
+8.3,Zachowanie po ponownym uruchomieniu,"1. Wprowadź zmiany w ustawieniach (np. zmień motyw).
+2. Zapisz pliki.
+3. Zamknij aplikację i uruchom ją ponownie.","- Ustawienia są zachowane.
+- Ostatnio wybrane repozytorium Git jest pamiętane.
+- Ewentualnie ostatnio otwarte pliki są ponownie otwarte (jeśli taka funkcjonalność jest zaimplementowana).",,
+9.1,Wprowadzanie błędów w kodzie,"1. W kodzie wprowadź celowe błędy składniowe lub stylistyczne (np. brak dwukropka po if w Pythonie).
+2. Uruchom lintera.","- Linter wykrywa błędy i wyświetla je w panelu wyjściowym.
+- Błędne linie są podkreślone w edytorze.",,
+9.2,Poprawianie błędów,"1. Popraw błędy wykryte przez lintera.
+2. Uruchom lintera ponownie.","- Linter nie zgłasza już tych błędów.
+- Podkreślenia błędów znikają z edytora.",,
