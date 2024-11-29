@@ -402,10 +402,17 @@ class CodeEditor(QPlainTextEdit):
 
         super().keyPressEvent(event)
 
+<<<<<<< HEAD
         # Inicjalizacja autouzupełniania
         if event.text().isidentifier() or event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
             if not self.settings.get('autocomplete_on_demand', False):
                 self.completion_timer.start()
+=======
+        # Uruchomienie opóźnionego autouzupełniania
+        if event.text().isidentifier() or event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+            # Opóźnienie na 2000ms (2 sekundy), zmień wedle potrzeby
+            self.completion_timer.start(2000)  # Opóźnienie wywołania autouzupełniania na 2 sekundy
+>>>>>>> 08b495c6355416d7e56d9d3fb17496c50c1bb835
 
     def accept_completion(self):
         """
@@ -764,7 +771,7 @@ class CodeEditor(QPlainTextEdit):
         except Exception as e:
             print(f"Autouzupełnianie błędów: {e}")
             self.completion_list.hide()
-
+            
     def complete_text(self, item):
         """
         Wstawia wybraną propozycję autouzupełniania do edytora.
@@ -781,6 +788,14 @@ class CodeEditor(QPlainTextEdit):
         self.setTextCursor(cursor)
         self.completion_list.hide()
 
+<<<<<<< HEAD
+=======
+    def accept_completion(self):
+        selected_item = self.completion_list.currentItem()
+        if selected_item:
+            self.complete_text(selected_item)
+            
+>>>>>>> 08b495c6355416d7e56d9d3fb17496c50c1bb835
 class CodeNavigatorPanel(QWidget):
     """
     Panel nawigacji po kodzie - wyświetla listę funkcji i klas.
@@ -922,9 +937,12 @@ class SettingsDialog(QDialog):
         self.setLayout(layout)
 
     def get_settings(self):
+<<<<<<< HEAD
         """
         Zwraca aktualne ustawienia z dialogu.
         """
+=======
+>>>>>>> 08b495c6355416d7e56d9d3fb17496c50c1bb835
         return {
             'clean_paste': self.clean_paste_checkbox.isChecked(),
             'smart_indent': self.smart_indent_checkbox.isChecked(),
@@ -933,8 +951,11 @@ class SettingsDialog(QDialog):
             'font_size': self.font_size_spin.value(),
             'auto_save': self.auto_save_checkbox.isChecked(),
             'focus_mode': self.focus_mode_checkbox.isChecked(),
+<<<<<<< HEAD
             'autocomplete_on_demand': self.autocomplete_on_demand_checkbox.isChecked(),
             'font_family': self.font_combo.currentText(),
+=======
+>>>>>>> 08b495c6355416d7e56d9d3fb17496c50c1bb835
         }
 
 class MainWindow(QMainWindow):
