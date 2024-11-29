@@ -1,0 +1,4 @@
+def przyklad():
+print('To jest przykładowy kod')
+    print('Popraw wcięcia!')
+###

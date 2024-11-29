@@ -154,6 +154,26 @@ class CodeEditor(QPlainTextEdit):
         self.highlighter.rehighlight()
         self.update()
 
+    def apply_theme(self, theme):
+        if theme == 'Ciemny':
+            self.setStyleSheet("background-color: #2b2b2b; color: #f8f8f2;")
+            self.highlighter.theme = 'monokai'  # Ustaw odpowiedni motyw
+        elif theme == 'Monokai':
+            self.setStyleSheet("background-color: #272822; color: #f8f8f2;")
+            self.highlighter.theme = 'monokai'
+        elif theme == 'Solarized Light':
+            self.setStyleSheet("background-color: #fdf6e3; color: #657b83;")
+            self.highlighter.theme = 'solarized-light'
+        elif theme == 'Solarized Dark':
+            self.setStyleSheet("background-color: #002b36; color: #839496;")
+            self.highlighter.theme = 'solarized-dark'
+        else:
+            self.setStyleSheet("")  # Domyślny jasny motyw
+            self.highlighter.theme = 'friendly'
+
+        self.highlighter.load_pygments_styles()
+        self.highlighter.rehighlight()
+
     def pasteEvent(self, event):
         """
         Obsługa wklejania z możliwością czyszczenia formatowania.
@@ -341,42 +361,6 @@ class CodeEditor(QPlainTextEdit):
         cr = self.contentsRect()
         self.line_number_area.setGeometry(QRect(cr.left(), cr.top(), self.line_number_area_width(), cr.height()))
 
-    def line_number_area_paint_event(self, event):
-        """
-        Rysuje numery linii, breakpointy i zakładki.
-        """
-        painter = QPainter(self.line_number_area)
-        if self.settings.get('theme', 'Jasny') == 'Ciemny':
-            painter.fillRect(event.rect(), QColor(43, 43, 43))  # Ciemne tło
-        else:
-            painter.fillRect(event.rect(), QColor(240, 240, 240))  # Jasne tło
-
-        block = self.firstVisibleBlock()
-        block_number = block.blockNumber()
-        top = int(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
-        bottom = top + int(self.blockBoundingRect(block).height())
-
-        while block.isValid() and top <= event.rect().bottom():
-            if block.isVisible() and bottom >= event.rect().top():
-                number = str(block_number + 1)
-                painter.setPen(QColor("black") if self.settings.get('theme', 'Jasny') == 'Jasny' else QColor("white"))
-                painter.drawText(0, top, self.line_number_area.width() - 5, self.fontMetrics().height(),
-                                 Qt.AlignmentFlag.AlignRight, number)
-
-                # Rysujemy breakpoint
-                if block_number in self.breakpoints:
-                    painter.setPen(QColor(255, 0, 0))
-                    painter.drawEllipse(2, top + 2, 10, 10)
-
-                # Rysujemy zakładkę
-                if hasattr(self, 'bookmarks') and block_number in self.bookmarks:
-                    painter.setPen(QColor(0, 0, 255))
-                    painter.drawRect(2, top + 2, 10, 10)
-
-            block = block.next()
-            top = bottom
-            bottom = top + int(self.blockBoundingRect(block).height())
-            block_number += 1
 
     def highlight_current_line(self):
         """

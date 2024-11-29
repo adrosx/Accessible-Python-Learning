@@ -278,9 +278,11 @@ class MainWindow(QMainWindow):
         settings.setValue('font_size', self.settings['font_size'])
         settings.setValue('auto_save', self.settings['auto_save'])
         settings.setValue('focus_mode', self.settings['focus_mode'])
+
     def closeEvent(self, event):
         self.save_settings()
         super().closeEvent(event)
+
     def apply_theme(self, theme):
         if theme == "Ciemny":
             self.setStyleSheet("""
@@ -305,16 +307,31 @@ class MainWindow(QMainWindow):
                 }
             """)
         else:
-                self.navigator_panel.apply_theme(theme)
+            self.setStyleSheet("")  # Resetuj styl dla jasnego motywu
+
+        # Zastosuj motyw w edytorach
+        for i in range(self.tab_widget.count()):
+            editor = self.tab_widget.widget(i)
+            editor.apply_theme(theme)
+        # Zastosuj motyw w panelu nawigacji
+        self.navigator_panel.apply_theme(theme)
 
     def apply_settings(self, settings):
-        # Tryb skupienia
-        if settings.get('focus_mode', False):
+        self.settings = settings
+        # Zastosuj motyw
+        self.apply_theme(self.settings['theme'])
+        # Zastosuj tryb skupienia
+        if self.settings.get('focus_mode', False):
             self.navigator_panel.hide()
             self.output.hide()
         else:
             self.navigator_panel.show()
             self.output.show()
+        # Aktualizacja ustawień auto-save
+        if self.settings.get('auto_save', True):
+            self.auto_save_timer.start()
+        else:
+            self.auto_save_timer.stop()
         # Zaktualizuj pasek statusu
         self.update_status_bar()
 
@@ -668,7 +685,13 @@ class MainWindow(QMainWindow):
         try:
             repo = git.Repo(self.git_repo_path)
             origin = repo.remote(name='origin')
-            origin.push()
+            current_branch = repo.active_branch
+            # Sprawdź, czy branch ma ustawiony upstream
+            if current_branch.tracking_branch() is None:
+                # Ustaw upstream
+                origin.push(refspec='{}:{}'.format(current_branch.name, current_branch.name), set_upstream=True)
+            else:
+                origin.push()
             QMessageBox.information(self, "Push", "Zmiany zostały wypchnięte na GitHub.")
         except git.exc.InvalidGitRepositoryError:
             QMessageBox.critical(self, "Git Błąd", "Nie znaleziono repozytorium Git w wybranym katalogu.")

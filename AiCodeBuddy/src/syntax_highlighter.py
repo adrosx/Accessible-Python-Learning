@@ -51,16 +51,17 @@ class GenericHighlighter(QSyntaxHighlighter):
         """
         Podświetla blok tekstu.
         """
-        block_number = self.currentBlock().blockNumber()
-        if block_number in self.error_lines:
-            self.setFormat(0, len(text), self.error_format)
-
         current_position = 0
         for token, content in lex(text, self.lexer):
+            length = len(content)
             if token in self.formats:
-                length = len(content)
                 self.setFormat(current_position, length, self.formats[token])
-            else:
-                default_format = QTextCharFormat()
-                self.setFormat(current_position, len(content), default_format)
-            current_position += len(content)
+            current_position += length
+
+        # Podświetlanie błędów po podświetleniu składni
+        block_number = self.currentBlock().blockNumber()
+        if block_number in self.error_lines:
+            error_format = QTextCharFormat()
+            error_format.setUnderlineColor(QColor("red"))
+            error_format.setUnderlineStyle(QTextCharFormat.UnderlineStyle.WaveUnderline)
+            self.setFormat(0, len(text), error_format)

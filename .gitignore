@@ -1,0 +1,18 @@
+# Ignorowanie cache Pythona
+__pycache__/
+*.py[cod]
+
+# Ignorowanie plików .env (zawierających zmienne środowiskowe, np. API keys)
+.env
+
+# Ignorowanie plików IDE
+.vscode/
+.idea/
+
+# Ignorowanie plików systemowych
+.DS_Store
+Thumbs.db
+
+# Możesz dodać inne pliki i foldery, które chcesz zignorować, np. logi, raporty testów itp.
+*.log
+conversation_history.json
