@@ -13,12 +13,12 @@ logging.basicConfig(
     filemode='w'
 )
 
-# Dodaj bieżący katalog ("src") do ścieżki importów
+# Dodaj ścieżkę do katalogu src, jeśli to konieczne
 current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, current_dir)  # Dodanie katalogu "src" na początku ścieżki
+sys.path.append(current_dir)
+
 
 def main():
-    # Główna funkcja aplikacji
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()

@@ -1,14 +1,5 @@
-# main_window.py
-
 import sys
 import os
-import uuid
-import shutil
-import subprocess
-import atexit
-import re
-import ast
-
 from PyQt6.QtWidgets import (
     QMainWindow, QPlainTextEdit, QFileDialog, QMessageBox, QTabWidget, QSplitter, QVBoxLayout, QWidget, QMenu, QDialog, QInputDialog
 )
@@ -19,7 +10,6 @@ from PyQt6.QtCore import Qt, QTimer, QSettings, QProcess
 from code_editor import CodeEditor
 from navigator_panel import CodeNavigatorPanel
 from settings_dialog import SettingsDialog
-
 # Importuj inne potrzebne moduły
 import subprocess
 import io
@@ -27,7 +17,6 @@ import contextlib
 import unittest
 import git
 import mimetypes
-import tempfile  # Dodany moduł do zarządzania plikami tymczasowymi
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -66,6 +55,15 @@ class MainWindow(QMainWindow):
         self.current_editor = None
         self.add_new_tab()
 
+        # Panel nawigacji kodu
+        self.navigator_panel = CodeNavigatorPanel(self)
+
+        # Podłączenie sygnału symbols_updated
+        self.current_editor.symbols_updated.connect(self.navigator_panel.update_symbols)
+        self.current_editor.update_symbols_panel()
+
+        # Splitter do podziału edytora i paneli bocznych
+        # W konstruktorze MainWindow
         # Splitter do podziału edytora i paneli bocznych
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
         main_splitter.addWidget(self.navigator_panel)
@@ -79,6 +77,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.output)
         splitter.setStretchFactor(0, 4)  # Main editor area
         splitter.setStretchFactor(1, 1)  # Output panel
+
 
         self.setCentralWidget(splitter)
 
@@ -117,14 +116,6 @@ class MainWindow(QMainWindow):
             editor.apply_settings(self.settings)
         # Zastosuj motyw
         self.apply_theme(self.settings['theme'])
-
-        # Tworzenie dedykowanego folderu temp
-        self.temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
-        os.makedirs(self.temp_dir, exist_ok=True)  # Tworzy folder temp, jeśli nie istnieje
-
-        # Rejestracja funkcji czyszczącej dla plików tymczasowych
-        atexit.register(self.cleanup_temp_files)
-
     def create_menu(self):
         """
         Tworzy menu aplikacji.
@@ -258,6 +249,7 @@ class MainWindow(QMainWindow):
         reset_commit_action.triggered.connect(self.git_reset_commit)
         git_menu.addAction(reset_commit_action)
 
+
     def open_settings_dialog(self):
         dialog = SettingsDialog(self)
         dialog.clean_paste_checkbox.setChecked(self.settings['clean_paste'])
@@ -296,15 +288,12 @@ class MainWindow(QMainWindow):
         settings.setValue('auto_save', self.settings['auto_save'])
         settings.setValue('focus_mode', self.settings['focus_mode'])
         settings.setValue('git_repo_path', self.settings.get('git_repo_path', ''))
-
+    
     def closeEvent(self, event):
         self.save_settings()
         super().closeEvent(event)
 
     def apply_theme(self, theme):
-        """
-        Zastosuj wybrany motyw do aplikacji i wszystkich edytorów.
-        """
         if theme == "Ciemny":
             self.setStyleSheet("""
                 QPlainTextEdit, QListWidget, QLineEdit, QTabWidget, QDialog {
@@ -338,9 +327,6 @@ class MainWindow(QMainWindow):
         self.navigator_panel.apply_theme(theme)
 
     def apply_settings(self, settings):
-        """
-        Zastosuj ustawienia do aplikacji i wszystkich edytorów.
-        """
         self.settings = settings
         # Zastosuj motyw
         self.apply_theme(settings['theme'])
@@ -363,10 +349,8 @@ class MainWindow(QMainWindow):
         # Zaktualizuj pasek statusu
         self.update_status_bar()
 
+
     def update_status_bar(self):
-        """
-        Aktualizuje pasek statusu na podstawie bieżącego edytora.
-        """
         editor = self.get_current_editor()
         if editor:
             undo_available = editor.document().isUndoAvailable()
@@ -377,9 +361,6 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("Brak aktywnego edytora.")
 
     def add_new_tab(self, code="", filename="Untitled"):
-        """
-        Dodaje nową zakładkę z edytorem kodu.
-        """
         editor = CodeEditor()
         editor.setPlainText(code)
         editor.setParent(self.tab_widget)
@@ -398,12 +379,10 @@ class MainWindow(QMainWindow):
         editor.textChanged.connect(self.update_status_bar)
         editor.undoAvailable.connect(self.update_status_bar)
         editor.redoAvailable.connect(self.update_status_bar)
-        editor.document().modificationChanged.connect(lambda: self.update_tab_title(editor))
+        editor.document().modificationChanged.connect(lambda:
+        self.update_tab_title(editor))
 
     def update_tab_title(self, editor):
-        """
-        Aktualizuje tytuł zakładki w zależności od stanu modyfikacji.
-        """
         index = self.tab_widget.indexOf(editor)
         if index != -1:
             filename = self.tab_widget.tabText(index).rstrip(' *')
@@ -413,9 +392,6 @@ class MainWindow(QMainWindow):
                 self.tab_widget.setTabText(index, filename)
 
     def on_tab_changed(self, index):
-        """
-        Obsługuje zmianę aktywnej zakładki.
-        """
         # Odłącz sygnał z poprzedniego edytora
         if hasattr(self, 'current_editor') and self.current_editor:
             try:
@@ -435,9 +411,6 @@ class MainWindow(QMainWindow):
         self.update_status_bar()
 
     def close_tab(self, index):
-        """
-        Zamknięcie zakładki po kliknięciu krzyżyka.
-        """
         if self.tab_widget.count() > 1:
             # Zatrzymaj linter w edytorze, który jest zamykany
             editor = self.tab_widget.widget(index)
@@ -456,15 +429,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Ostrzeżenie", "Nie można zamknąć ostatniej zakładki.")
 
     def get_current_editor(self):
-        """
-        Zwraca bieżący edytor kodu.
-        """
         return self.current_editor
 
     def run_code_linter(self):
-        """
-        Metoda wywołująca linter w CodeEditor.
-        """
+        """Metoda wywołująca linter w CodeEditor"""
         editor = self.get_current_editor()
         if editor:
             editor.run_linter()
@@ -472,15 +440,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Linter", "Brak aktywnego edytora.")
 
     def new_file(self):
-        """
-        Tworzy nowy plik w nowej zakładce.
-        """
         self.add_new_tab()
 
     def open_file(self):
-        """
-        Otwiera plik i dodaje go do nowej zakładki.
-        """
         path, _ = QFileDialog.getOpenFileName(self, "Otwórz plik", "",
             "Python Files (*.py);;JavaScript Files (*.js);;C++ Files (*.cpp *.hpp);;Go Files (*.go);;All Files (*)")
         if path:
@@ -502,11 +464,8 @@ class MainWindow(QMainWindow):
                 self.tab_paths[current_index] = path
             except Exception as e:
                 QMessageBox.critical(self, "Błąd", f"Nie można otworzyć pliku:\n{e}")
-
+    
     def get_language_from_extension(self, ext):
-        """
-        Określa język programowania na podstawie rozszerzenia pliku.
-        """
         ext = ext.lower()
         if ext == '.py':
             return 'python'
@@ -520,9 +479,6 @@ class MainWindow(QMainWindow):
             return 'plaintext'  # Domyślny język dla nieobsługiwanych plików
 
     def save_file(self):
-        """
-        Zapisuje bieżący plik. Jeśli plik nie ma przypisanej ścieżki, otwiera dialog "Zapisz jako...".
-        """
         editor = self.get_current_editor()
         if editor:
             current_index = self.tab_widget.currentIndex()
@@ -533,9 +489,6 @@ class MainWindow(QMainWindow):
                 self.save_to_path(file_path, editor.toPlainText())
 
     def save_file_as(self):
-        """
-        Otwiera dialog "Zapisz jako..." i zapisuje plik pod wybraną ścieżką.
-        """
         editor = self.get_current_editor()
         if editor:
             path, _ = QFileDialog.getSaveFileName(self, "Zapisz plik jako", "",
@@ -553,9 +506,6 @@ class MainWindow(QMainWindow):
                     QMessageBox.critical(self, "Błąd", f"Nie można zapisać pliku:\n{e}")
 
     def save_to_path(self, path, code):
-        """
-        Zapisuje kod do podanej ścieżki.
-        """
         try:
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(code)
@@ -564,20 +514,13 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Błąd", f"Nie można zapisać pliku:\n{e}")
 
     def export_to_html(self):
-        """
-        Eksportuje kod do pliku HTML z podświetleniem składni.
-        """
-        from pygments import highlight
-        from pygments.lexers import get_lexer_by_name
-        from pygments.formatters import HtmlFormatter
-
         editor = self.get_current_editor()
         if editor:
             code = editor.toPlainText()
             language = editor.highlighter.lexer.name.lower()
             lexer = get_lexer_by_name(language)
-            formatter = HtmlFormatter(full=True, linenos=True, style='friendly')
-            html_code = highlight(code, lexer, formatter)
+            formatter = pygments.formatters.HtmlFormatter(full=True, linenos=True, style='friendly')
+            html_code = pygments.highlight(code, lexer, formatter)
 
             path, _ = QFileDialog.getSaveFileName(self, "Eksportuj do HTML", "", "HTML Files (*.html);;All Files (*)")
             if path:
@@ -589,26 +532,19 @@ class MainWindow(QMainWindow):
                     QMessageBox.critical(self, "Eksport Błąd", f"Nie można wyeksportować do HTML:\n{e}")
 
     def export_to_pdf(self):
-        """
-        Eksportuje kod do pliku PDF z podświetleniem składni.
-        """
-        from pygments import highlight
-        from pygments.lexers import get_lexer_by_name
-        from pygments.formatters import HtmlFormatter
-
         editor = self.get_current_editor()
         if editor:
             code = editor.toPlainText()
             language = editor.highlighter.lexer.name.lower()
             lexer = get_lexer_by_name(language)
-            formatter = HtmlFormatter(full=True, linenos=True, style='friendly')
-            html_code = highlight(code, lexer, formatter)
+            formatter = pygments.formatters.HtmlFormatter(full=True, linenos=True, style='friendly')
+            html_code = pygments.highlight(code, lexer, formatter)
 
             path, _ = QFileDialog.getSaveFileName(self, "Eksportuj do PDF", "", "PDF Files (*.pdf);;All Files (*)")
             if path:
                 try:
                     # Konwertuj HTML do PDF za pomocą wkhtmltopdf
-                    temp_html = os.path.join(self.temp_dir, f"temp_export_{uuid.uuid4().hex}.html")
+                    temp_html = "temp_export.html"
                     with open(temp_html, 'w', encoding='utf-8') as f:
                         f.write(html_code)
                     subprocess.run(['wkhtmltopdf', temp_html, path], check=True)
@@ -618,78 +554,89 @@ class MainWindow(QMainWindow):
                     QMessageBox.critical(self, "Eksport Błąd", f"Nie można wyeksportować do PDF:\n{e}")
 
     def run_code(self):
-        """
-        Uruchamia napisany przez użytkownika skrypt w osobnym procesie.
-        Tworzy unikalne pliki tymczasowe w folderze temp i usuwa je po zakończeniu.
-        """
         editor = self.get_current_editor()
         if editor:
-            language = editor.highlighter.lexer.name.lower()
             code = editor.toPlainText()
-
-            # Generowanie unikalnej nazwy pliku tymczasowego
-            temp_filename = f"temp_run_{uuid.uuid4().hex}.py"  # Możesz zmienić rozszerzenie w zależności od języka
-            temp_filepath = os.path.join(self.temp_dir, temp_filename)
-
+            language = editor.highlighter.lexer.name.lower()
             try:
-                # Zapisz bieżący kod do pliku tymczasowego
-                with open(temp_filepath, 'w', encoding='utf-8') as f:
+                # Zapisz tymczasowy plik
+                if language == 'python':
+                    temp_file = "temp_script.py"
+                elif language == 'javascript':
+                    temp_file = "temp_script.js"
+                elif language == 'cpp':
+                    temp_file = "temp_script.cpp"
+                elif language == 'go':
+                    temp_file = "temp_script.go"
+                else:
+                    temp_file = "temp_script.py"  # Domyślny interpreter
+
+                with open(temp_file, 'w', encoding='utf-8') as f:
                     f.write(code)
-                print(f"Zapisano skrypt do pliku tymczasowego: {temp_filepath}")
 
-                # Uruchom skrypt w osobnym procesie
-                process = subprocess.Popen(
-                    [self.python_interpreter, temp_filepath],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
+                # Uruchom skrypt
+                process = QProcess(self)
+                if language == 'python':
+                    interpreter = self.python_interpreter
+                    args = [temp_file]
+                elif language == 'javascript':
+                    interpreter = 'node'  # Upewnij się, że Node.js jest zainstalowany
+                    args = [temp_file]
+                elif language == 'cpp':
+                    # Kompilacja i uruchomienie C++
+                    executable = "temp_script.exe" if sys.platform == 'win32' else "./temp_script"
+                    compile_process = subprocess.run(['g++', temp_file, '-o', 'temp_script'], capture_output=True, text=True)
+                    if compile_process.returncode != 0:
+                        self.output.appendPlainText(">>> Błąd kompilacji:")
+                        self.output.appendPlainText(compile_process.stderr)
+                        return
+                    interpreter = executable
+                    args = []
+                elif language == 'go':
+                    # Kompilacja i uruchomienie Go
+                    executable = "temp_script" if sys.platform != 'win32' else "temp_script.exe"
+                    compile_process = subprocess.run(['go', 'build', '-o', executable, temp_file], capture_output=True, text=True)
+                    if compile_process.returncode != 0:
+                        self.output.appendPlainText(">>> Błąd kompilacji:")
+                        self.output.appendPlainText(compile_process.stderr)
+                        return
+                    interpreter = os.path.abspath(executable)
+                    args = []
+                else:
+                    interpreter = self.python_interpreter
+                    args = [temp_file]
 
-                # Odczytaj wyjście i błędy
-                stdout, stderr = process.communicate()
+                process.setProgram(interpreter)
+                process.setArguments(args)
+                process.start()
+                process.waitForFinished()
 
-                # Wyświetl wyniki w oknie output
-                self.output.clear()
-                if stdout:
+                output = process.readAllStandardOutput().data().decode()
+                error = process.readAllStandardError().data().decode()
+
+                if output:
                     self.output.appendPlainText(">>> Wynik:")
-                    self.output.appendPlainText(stdout)
-                if stderr:
-                    self.output.appendPlainText(">>> Błędy:")
-                    self.output.appendPlainText(stderr)
-                if not stdout and not stderr:
-                    self.output.appendPlainText(">>> Skrypt zakończył się bez wyjścia.")
+                    self.output.appendPlainText(output)
+                if error:
+                    self.output.appendPlainText(">>> Błąd:")
+                    self.output.appendPlainText(error)
             except Exception as e:
                 QMessageBox.critical(self, "Błąd", f"Nie można uruchomić skryptu:\n{e}")
-            finally:
-                # Usunięcie pliku tymczasowego po zakończeniu
-                if os.path.exists(temp_filepath):
-                    try:
-                        os.remove(temp_filepath)
-                        print(f"Usunięto plik tymczasowy: {temp_filepath}")
-                    except Exception as e:
-                        print(f"Nie udało się usunąć pliku {temp_filepath}: {e}")
 
     def debug_code(self):
-        """
-        Debuguje skrypt Pythona za pomocą debugpy.
-        """
         editor = self.get_current_editor()
         if editor:
-            language = editor.highlighter.lexer.name.lower()
             code = editor.toPlainText()
+            language = editor.highlighter.lexer.name.lower()
             if language != 'python':
                 QMessageBox.warning(self, "Debugowanie", "Debugowanie jest obecnie dostępne tylko dla Pythona.")
                 return
 
-            # Generowanie unikalnej nazwy pliku tymczasowego
-            temp_file = os.path.join(self.temp_dir, f"temp_debug_{uuid.uuid4().hex}.py")
+            temp_file = "temp_debug_script.py"
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                f.write(code)
 
             try:
-                # Zapisz bieżący kod do pliku tymczasowego
-                with open(temp_file, 'w', encoding='utf-8') as f:
-                    f.write(code)
-                print(f"Zapisano skrypt do pliku tymczasowego: {temp_file}")
-
                 # Sprawdź, czy debugpy jest zainstalowany
                 subprocess.run([self.python_interpreter, '-m', 'debugpy', '--version'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except subprocess.CalledProcessError:
@@ -697,9 +644,6 @@ class MainWindow(QMainWindow):
                 return
             except FileNotFoundError:
                 QMessageBox.critical(self, "Debugowanie Błąd", "Interpreter Python nie został znaleziony.")
-                return
-            except Exception as e:
-                QMessageBox.critical(self, "Debugowanie Błąd", f"Nie można zapisać skryptu do debugowania:\n{e}")
                 return
 
             try:
@@ -721,62 +665,40 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Debugowanie Błąd", f"Nie można uruchomić debuggera:\n{e}")
 
     def run_tests(self):
-        """
-        Uruchamia testy jednostkowe napisane w Pythonie.
-        """
         editor = self.get_current_editor()
         if editor:
-            language = editor.highlighter.lexer.name.lower()
             code = editor.toPlainText()
+            language = editor.highlighter.lexer.name.lower()
             if language != 'python':
                 QMessageBox.warning(self, "Testowanie", "Testowanie jest dostępne tylko dla Pythona.")
                 return
 
-            # Generowanie unikalnej nazwy pliku tymczasowego
-            temp_file = os.path.join(self.temp_dir, f"temp_test_{uuid.uuid4().hex}.py")
+            temp_file = "temp_test_script.py"
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                f.write(code)
 
             try:
-                # Zapisz bieżący kod do pliku tymczasowego
-                with open(temp_file, 'w', encoding='utf-8') as f:
-                    f.write(code)
-                print(f"Zapisano skrypt do pliku tymczasowego: {temp_file}")
-
                 # Uruchomienie testów
                 test_output = io.StringIO()
                 with contextlib.redirect_stdout(test_output):
                     loader = unittest.TestLoader()
-                    suite = loader.discover('.', pattern=os.path.basename(temp_file))
+                    suite = loader.discover('.', pattern='temp_test_script.py')
                     runner = unittest.TextTestRunner(stream=test_output, verbosity=2)
                     runner.run(suite)
 
                 output = test_output.getvalue()
-                self.output.clear()
                 self.output.appendPlainText(">>> Testy:")
                 self.output.appendPlainText(output)
             except Exception as e:
                 QMessageBox.critical(self, "Testowanie Błąd", f"Wystąpił błąd podczas uruchamiania testów:\n{e}")
-            finally:
-                # Usunięcie pliku tymczasowego po zakończeniu
-                if os.path.exists(temp_file):
-                    try:
-                        os.remove(temp_file)
-                        print(f"Usunięto plik tymczasowy: {temp_file}")
-                    except Exception as e:
-                        print(f"Nie udało się usunąć pliku {temp_file}: {e}")
 
     def set_flake8_config(self):
-        """
-        Ustawia plik konfiguracyjny Flake8.
-        """
         path, _ = QFileDialog.getOpenFileName(self, "Wybierz plik konfiguracyjny Flake8", "", "Config Files (*.ini *.cfg *.toml);;All Files (*)")
         if path:
             self.flake8_config = path
             QMessageBox.information(self, "Konfiguracja Flake8", f"Załadowano konfigurację: {self.flake8_config}")
 
     def select_interpreter(self):
-        """
-        Umożliwia użytkownikowi wybór interpretera Pythona.
-        """
         path, _ = QFileDialog.getOpenFileName(self, "Wybierz interpreter Pythona", "", "Python Executable (*.exe);;All Files (*)")
         if path:
             self.python_interpreter = path
@@ -784,9 +706,6 @@ class MainWindow(QMainWindow):
 
     # Operacje Git
     def git_commit(self):
-        """
-        Wykonuje operację commit w repozytorium Git.
-        """
         try:
             repo = git.Repo(self.git_repo_path)
             commit_message, ok = QInputDialog.getText(self, 'Commit', 'Wpisz wiadomość commit:')
@@ -800,9 +719,6 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Git Błąd", f"Wystąpił błąd podczas commitowania: {e}")
 
     def git_push(self):
-        """
-        Wykonuje operację push w repozytorium Git.
-        """
         try:
             repo = git.Repo(self.git_repo_path)
             origin = repo.remote(name='origin')
@@ -820,9 +736,6 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Git Błąd", f"Wystąpił błąd podczas pushowania: {e}")
 
     def git_pull(self):
-        """
-        Wykonuje operację pull w repozytorium Git.
-        """
         try:
             repo = git.Repo(self.git_repo_path)
             origin = repo.remote(name='origin')
@@ -834,9 +747,6 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Git Błąd", f"Wystąpił błąd podczas pullowania: {e}")
 
     def git_create_branch(self):
-        """
-        Tworzy nowy branch w repozytorium Git.
-        """
         try:
             repo = git.Repo(self.git_repo_path)
             branch_name, ok = QInputDialog.getText(self, 'Create Branch', 'Wpisz nazwę nowego brancha:')
@@ -849,9 +759,6 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Git Błąd", f"Wystąpił błąd podczas tworzenia brancha: {e}")
 
     def git_merge_branch(self):
-        """
-        Merguje wybrany branch z bieżącym branch'em w repozytorium Git.
-        """
         try:
             repo = git.Repo(self.git_repo_path)
             branches = [head.name for head in repo.heads]
@@ -868,9 +775,6 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Git Błąd", f"Wystąpił błąd podczas mergowania: {e}")
 
     def git_show_log(self):
-        """
-        Pokazuje log commitów w oknie dialogowym.
-        """
         try:
             repo = git.Repo(self.git_repo_path)
             logs = repo.git.log('--oneline', '--graph', '--all')
@@ -890,9 +794,6 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Git Błąd", f"Wystąpił błąd podczas pobierania logów: {e}")
 
     def git_delete_branch(self):
-        """
-        Usuwa wybrany branch w repozytorium Git.
-        """
         try:
             repo = git.Repo(self.git_repo_path)
             branches = [head.name for head in repo.branches if head.name != repo.active_branch.name]
@@ -909,9 +810,6 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Git Błąd", f"Wystąpił błąd podczas usuwania brancha: {e}")
 
     def git_checkout_branch(self):
-        """
-        Przełącza się na wybrany branch w repozytorium Git.
-        """
         try:
             repo = git.Repo(self.git_repo_path)
             branches = [head.name for head in repo.heads]
@@ -923,9 +821,6 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Git Błąd", f"Wystąpił błąd podczas przełączania brancha: {e}")
 
     def git_reset_commit(self):
-        """
-        Resetuje repozytorium Git do wybranego commita.
-        """
         try:
             repo = git.Repo(self.git_repo_path)
             commits = list(repo.iter_commits())
@@ -938,10 +833,8 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Git Błąd", f"Wystąpił błąd podczas resetowania: {e}")
 
+
     def select_git_repo(self):
-        """
-        Pozwala użytkownikowi wybrać repozytorium Git.
-        """
         path = QFileDialog.getExistingDirectory(self, "Wybierz Repozytorium Git", "")
         if path:
             try:
@@ -955,9 +848,6 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Git Błąd", "Wybrany folder nie jest repozytorium Git.")
 
     def auto_save(self):
-        """
-        Automatycznie zapisuje wszystkie otwarte pliki, jeśli opcja auto-save jest włączona.
-        """
         for i in range(self.tab_widget.count()):
             editor = self.tab_widget.widget(i)
             file_path = self.tab_paths.get(i)
@@ -969,25 +859,8 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     print(f"Auto-save failed for {file_path}: {e}")
 
-    def cleanup_temp_files(self):
-        """
-        Usuwa folder temp wraz z wszystkimi plikami tymczasowymi przy zamknięciu aplikacji.
-        """
-        if os.path.exists(self.temp_dir):
-            try:
-                shutil.rmtree(self.temp_dir)
-                print(f"Usunięto folder tymczasowy: {self.temp_dir}")
-            except Exception as e:
-                print(f"Nie udało się usunąć folderu {self.temp_dir}: {e}")
-
 def main():
-    """
-    Główna funkcja uruchamiająca aplikację.
-    """
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
-
-if __name__ == "__main__":
-    main()

@@ -1,0 +1,99 @@
+# Standardowe biblioteki Pythona
+import os  # Operacje na systemie plików
+import sys  # Interakcja z systemem operacyjnym, np. ścieżki, argumenty
+import re  # Wyrażenia regularne
+import subprocess  # Uruchamianie procesów systemowych
+import bisect  # Operacje na posortowanych listach (np. wstawianie)
+import ast  # Obsługa drzewa składniowego Pythona (do analizy kodu)
+import logging  # Rejestrowanie logów (przydatne do debugowania)
+from functools import wraps  # Dekoratory i operacje na funkcjach
+import io  # Operacje wejścia/wyjścia (np. na plikach w pamięci)
+import contextlib  # Narzędzia do pracy z kontekstami (np. zarządzanie zasobami)
+import unittest  # Testowanie jednostkowe
+import jedi  # Biblioteka do analizy kodu Python (np. autouzupełnianie, refaktoryzacja)
+
+# Moduły PyQt6 (do tworzenia GUI)
+from PyQt6.QtWidgets import (
+    QApplication,  # Główna aplikacja GUI
+    QMainWindow,  # Główne okno aplikacji
+    QPlainTextEdit,  # Edytor tekstu bez formatowania
+    QWidget,  # Podstawowy widget (kontener dla innych widgetów)
+    QVBoxLayout,  # Układ widgetów w kolumnie
+    QHBoxLayout,  # Układ widgetów w wierszu
+    QDialog,  # Okno dialogowe
+    QCheckBox,  # Pole wyboru (checkbox)
+    QLabel,  # Etykieta tekstowa
+    QComboBox,  # Rozwijane menu
+    QSpinBox,  # Pole do wprowadzania liczb
+    QPushButton,  # Przycisk
+    QFileDialog,  # Okno dialogowe wyboru pliku
+    QInputDialog,  # Okno dialogowe do wprowadzania danych
+    QMessageBox,  # Okno komunikatów
+    QListWidget,  # Lista widgetów
+    QListWidgetItem,  # Element w liście
+    QSplitter,  # Rozdzielacz w oknie (do dzielenia przestrzeni)
+    QTabWidget,  # Widget kart (np. zakładki)
+    QToolTip  # Podpowiedzi narzędziowe
+
+from PyQt6.QtGui import (
+    QFont,  # Czcionki
+    QColor,  # Kolory
+    QTextFormat,  # Formatowanie tekstu
+    QPainter,  # Rysowanie na widgetach
+    QSyntaxHighlighter,  # Podświetlanie składni w edytorze tekstu
+    QTextCharFormat,  # Formatowanie znaków w edytorze tekstu
+    QTextCursor,  # Kursor w edytorze tekstu
+    QAction,  # Akcja w menu lub na pasku narzędzi
+    QKeySequence,  # Sekwencje klawiszy
+    QIcon  # Ikony w GUI
+
+from PyQt6.QtCore import (
+    Qt,  # Przestrzeń nazw z wartościami np. dla zdarzeń GUI (np. kliknięcia)
+    QRect,  # Prostokąt (np. wymiary widgetów)
+    QProcess,  # Uruchamianie procesów
+    pyqtSignal,  # Sygnalizacja w Qt (do komunikacji między obiektami)
+    QSize,  # Rozmiary (np. widgetów)
+    QTimer,  # Timery
+    QObject,  # Podstawowa klasa w Qt dla obiektów
+    QThread,  # Wątki
+    QRegularExpression  # Obsługa wyrażeń regularnych
+
+
+
+
+
+class LinterWorker(QObject):
+
+
+class CodeEditor(QPlainTextEdit):
+
+    def __init__(self, parent=None):
+    def apply_settings(self, settings):
+    def pasteEvent(self, event):
+    def keyPressEvent(self, event):
+    def toggle_breakpoint(self, block_number):
+    def line_number_area_width(self):
+    def update_line_number_area_width(self, _):
+    def update_line_number_area(self, rect, dy):
+    def resizeEvent(self, event):
+    def line_number_area_paint_event(self, event):
+    def highlight_current_line(self):
+    def on_text_changed(self):
+    def run_linter(self):
+    def cleanup_linter_thread(self):
+    def on_linter_finished(self, errors):
+    def on_linter_error(self, error_message):
+    def update_symbols_panel(self):
+    def extract_symbols(self, code):
+    def get_line_number(self, position, line_start_positions):
+    def show_find_dialog(self):
+    def find_next(self):
+    def mouseMoveEvent(self, event):
+    def show_completions(self):
+    def complete_text(self, item):
+            
+class CodeNavigatorPanel(QWidget):
+    def __init__(self, main_window):
+    def update_symbols(self, symbols):
+    def go_to_function(self, item):
+    def go_to_class(self, item):

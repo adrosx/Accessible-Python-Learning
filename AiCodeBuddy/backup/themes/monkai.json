@@ -1,0 +1,15 @@
+{
+  "editor_style": {
+    "background": "#272822",
+    "foreground": "#f8f8f2"
+  },
+  "syntax_style": {
+    "Token.Keyword": {"color": "#66d9ef", "bold": true},
+    "Token.String": {"color": "#e6db74"},
+    "Token.Comment": {"color": "#75715e", "italic": true},
+    "Token.Name.Function": {"color": "#a6e22e"},
+    "Token.Name.Class": {"color": "#a6e22e", "bold": true},
+    "Token.Operator": {"color": "#f92672"}
+    // Dodaj więcej tokenów według potrzeb
+  }
+}
